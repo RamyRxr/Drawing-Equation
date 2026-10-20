@@ -124,3 +124,19 @@ The user chose **Mode B**: explain the existing code carefully, block by block.
 They are learning, not just shipping. Do not dump giant unexplained code; explain
 the "why" of each part and tie it back to the math. When building new code,
 favor small, reviewable steps and keep the animation quality high.
+
+## Session log (newest first)
+
+### 2026-10-20 — Python prototype + code walkthrough
+- Built the Python prototype: `python/shapes.py`, `python/fourier.py`,
+  `python/main.py`. Committed `1412638`, pushed to `origin/main`.
+- Verified numerically: crown RMSE falls 0.34 → 0.000000 as terms go 1 → 512.
+  Generated `output/crown_static.png` and `output/crown_epicycles.gif`.
+- Created this `AGENTS.md` (commit `bf98df4`).
+- **Walked the user through all three Python files line by line (Mode B).**
+  Covered: arc-length resampling, complex-signal DFT trick, `fft/N` vs `fftfreq`,
+  sort-by-|c| optimality, `reconstruct` vs `chain` (pen tip vs joints),
+  RMSE at matching thetas, artist-reuse animation performance.
+- **Next up:** user was choosing between (A) small exercises to cement the math,
+  or (B) starting the `web/` app. Nothing in `web/` exists yet; `test.js` is still
+  an empty leftover. Do not regress the verified math above.
