@@ -19,6 +19,8 @@ real shape (via the DFT) and animates the circles that draw it.
 ## Layout
 
 ```
+.venv/            # virtual environment (numpy + matplotlib) — repo root, git-ignored
+output/           # generated PNG/GIFs — git-ignored
 python/           # prototype: prove the math
   shapes.py       # crown, star, heart, infinity
   fourier.py      # DFT, reconstruction, chain, error
@@ -28,19 +30,32 @@ web/              # polished interactive app (coming next)
 
 ## Run the Python prototype
 
+The virtual environment lives at the **repo root** (`.venv/`), not inside
+`python/`. To create it from scratch:
+
+```powershell
+cd Drawing-Equation
+C:\Python315\python.exe -m venv .venv
+.\.venv\Scripts\pip install numpy matplotlib
+```
+
+Then run the prototype:
+
 ```powershell
 cd python
-python -m venv .venv
-.\.venv\Scripts\pip install numpy matplotlib
 
 # compare 3 / 8 / 20 / 60 terms
-.\.venv\Scripts\python main.py --shape crown --static
+..\.venv\Scripts\python main.py --shape crown --static
 
 # spinning epicycles -> output/crown_epicycles.gif
-.\.venv\Scripts\python main.py --shape crown --animate --terms 32 --frames 100
+..\.venv\Scripts\python main.py --shape crown --animate --terms 32 --frames 100
 ```
 
 Output goes to `output/`.
+
+> **New to virtual environments?** See
+> [EXPLANATION.md → The virtual environment](EXPLANATION.md#the-virtual-environment-venv)
+> for what `.venv/` actually contains and how to activate it.
 
 ## The math in one line
 

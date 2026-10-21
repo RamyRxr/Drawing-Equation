@@ -1,10 +1,30 @@
 # Drawing-Equation — How It Works
 
-This document explains what the project is, how to run it, what the math is
-actually doing, and how to add your own shapes.
+A complete guide to this project: what it is, how the folder is organised
+(including the virtual environment), how to run it, what the math actually
+does, and how to add your own shapes.
 
-If you only read one section, read **[The idea in one paragraph](#the-idea-in-one-paragraph)**
-and **[How to add a new shape](#how-to-add-a-new-shape)**.
+If you only read one section, read
+**[The idea in one paragraph](#the-idea-in-one-paragraph)**,
+**[Repository layout](#repository-layout)** and
+**[How to add a new shape](#how-to-add-a-new-shape)**.
+
+---
+
+## Table of contents
+
+1. [The idea in one paragraph](#the-idea-in-one-paragraph)
+2. [Repository layout](#repository-layout)
+3. [The virtual environment (`.venv`)](#the-virtual-environment-venv)
+4. [Quick start](#quick-start)
+5. [Command-line options](#command-line-options)
+6. [The end-to-end data flow](#the-end-to-end-data-flow)
+7. [The math](#the-math)
+8. [How the rendering works](#how-the-rendering-works)
+9. [How to add a new shape](#how-to-add-a-new-shape)
+10. [Design decisions already locked in](#design-decisions-already-locked-in)
+11. [Porting to the web (`web/`, not started)](#porting-to-the-web-web-not-started)
+12. [Troubleshooting](#troubleshooting)
 
 ---
 
@@ -24,31 +44,242 @@ chain of circles is called **epicycles**, and this project draws them.
 
 ```
 Drawing-Equation/
-├── AGENTS.md          project memory (status, decisions, verified numbers)
-├── EXPLANATION.md     <- you are here
-├── README.md
-├── .gitignore         ignores .venv/, __pycache__/, output/
-├── python/
-│   ├── shapes.py      shape definitions + arc-length resampling
-│   ├── fourier.py     the math: DFT, reconstruction, epicycle chain, RMSE
-│   └── main.py        CLI: writes the static PNG and the animated GIF
-├── output/            generated files (git-ignored)
-│   ├── crown_static.png
-│   └── crown_epicycles.gif
-└── web/               interactive Canvas app (not built yet)
+│
+├── .git/                      Git's own database (history, branches, index)
+│
+├── .venv/                     ← THE VIRTUAL ENVIRONMENT  [see section 3]
+│   ├── .gitignore             contains just "*" — the venv hides itself from Git
+│   ├── pyvenv.cfg             venv config: Python version + base interpreter
+│   ├── Include/               empty on Windows (C headers on Linux/macOS)
+│   ├── Lib/
+│   │   └── site-packages/     ← pip installs every package HERE
+│   ├── Scripts/               ← python.exe, pip.exe, activate scripts, etc.
+│   └── share/
+│       └── man/man1/          man pages (ttx.1, shipped by fontTools)
+│
+├── output/                    generated artwork (git-ignored, safe to delete)
+│   ├── crown_static.png       4-panel comparison: 3 / 8 / 20 / 60 terms
+│   ├── crown_epicycles.gif    spinning epicycles, 32 circles
+│   ├── heart_static.png
+│   └── heart_epicycles.gif
+│
+├── python/                    the prototype
+│   ├── __pycache__/           compiled .pyc cache (git-ignored, auto-created)
+│   ├── shapes.py              shape definitions + arc-length resampling
+│   ├── fourier.py             the math: DFT, reconstruction, epicycle chain, RMSE
+│   └── main.py                CLI: writes the static PNG and the animated GIF
+│
+├── .gitignore                 ignores .venv/, __pycache__/, output/
+├── AGENTS.md                  project memory (status, decisions, verified numbers)
+├── EXPLANATION.md             ← you are here
+└── README.md                  short front door — points at this file
 ```
 
-The three Python files have one job each:
+### The three Python files, one job each
 
-| File | Responsibility |
-|---|---|
-| `shapes.py` | Produce a shape as an `(N, 2)` array of points |
-| `fourier.py` | Turn those points into coefficients and back again |
-| `main.py` | Command-line interface + all the drawing/rendering |
+| File | Responsibility | Knows about |
+|---|---|---|
+| `shapes.py` | Produce a shape as an `(N, 2)` array of points | NumPy only |
+| `fourier.py` | Turn those points into coefficients and back again | NumPy only |
+| `main.py` | Command-line interface + all the drawing/rendering | Matplotlib |
 
-`fourier.py` never touches matplotlib. `main.py` never does math beyond calling
-`fourier.py`. Keeping the math pure is what makes it testable and portable to
-JavaScript later.
+`fourier.py` **never touches matplotlib**. `main.py` **never does math** beyond
+calling `fourier.py`. Keeping the math pure is what makes it testable and
+portable to JavaScript later — when the web app arrives, `fourier.py` can be
+translated to `dft.js` one-to-one with no drawing code in the way.
+
+### Which folders are tracked by Git?
+
+| Folder | In Git? | Why |
+|---|---|---|
+| `python/` | ✅ yes | this is the actual source code |
+| `AGENTS.md`, `README.md`, `EXPLANATION.md` | ✅ yes | documentation |
+| `.gitignore` | ✅ yes | tells Git what to skip |
+| `.venv/` | ❌ **no** | 133 MB of third-party binaries — machine-specific, regenerated on demand |
+| `output/` | ❌ **no** | build artifacts — 2 MB of PNGs/GIFs you can regenerate |
+| `python/__pycache__/` | ❌ **no** | Python's byte-code cache, rebuilt automatically |
+| `.git/` | ❌ **no** | Git's internals |
+
+---
+
+## The virtual environment (`.venv`)
+
+This is the single most confusing thing for a newcomer, so this section is
+long. Read it once and the rest of the project becomes obvious.
+
+### What problem does it solve?
+
+Python packages are installed **globally** by default: `pip install numpy`
+drops NumPy into your system Python's `site-packages`. That causes three
+classic problems:
+
+1. **Version conflicts.** Project A needs NumPy 1.x, project B needs NumPy 2.x.
+   Installed globally, they fight over the same folder and one of them breaks.
+2. **Permission errors.** Global installs often need administrator rights on
+   Windows, and you get `Access is denied` half-way through.
+3. **No record of what the project needs.** Six months later you cannot tell
+   which packages a project actually requires.
+
+A **virtual environment** solves all three. It is just a private, isolated
+folder containing its own Python interpreter and its own package folder. When
+you install into it, nothing touches the system Python.
+
+The name `.venv` is a convention. The leading dot makes it **hidden** on Unix
+(`ls -a` needed to see it) and makes most tools skip it by default.
+
+### Where it lives — an important detail
+
+```
+C:\Users\Ramy\Desktop\HQP\Drawing-Equation\.venv      ← THIS one, at the REPO ROOT
+C:\Users\Ramy\Desktop\HQP\Drawing-Equation\python\.venv ← NOT this
+```
+
+The venv sits **next to `python/`, not inside it**. That is why every command
+in this project has to reach *up* one level:
+
+```powershell
+..\.venv\Scripts\python.exe main.py --shape crown --static
+```
+
+That `..` means "parent directory". From inside `python/`, `..` is the repo
+root, where `.venv` actually is.
+
+> **Note:** an older version of `README.md` told you to create the venv inside
+> `python/`. That has been corrected — the venv lives at the repo root, and
+> that is what is on disk right now.
+
+### Anatomy of the folder
+
+| Path | What it is | Do you ever edit it? |
+|---|---|---|
+| `.venv/pyvenv.cfg` | The venv's identity card: Python version, path to the base interpreter, whether system site-packages are visible | Never |
+| `.venv/Scripts/` | The executables: `python.exe`, `pythonw.exe`, `pip.exe`, `pip3.exe`, `activate.ps1`, `deactivate.bat`, plus small wrappers for every installed package (`f2py.exe`, `ttx.exe`, `fonttools.exe`…) | Never |
+| `.venv/Lib/site-packages/` | **Where every installed package lives.** This is the folder `pip` writes to | Never |
+| `.venv/Include/` | C headers for building native extensions. Empty on Windows (no compiler by default) | Never |
+| `.venv/share/` | Data files that aren't Python modules — here, `man/man1/ttx.1`, a man page from fontTools | Never |
+| `.venv/.gitignore` | Contains a single `*`. The venv marks itself as ignorable, so even a broken root `.gitignore` won't accidentally commit 133 MB | Never |
+
+**The rule of thumb: you never type a file inside `.venv/`. You only run
+things from it and let `pip` write into it.**
+
+### What's actually installed
+
+Right now the venv contains exactly these packages:
+
+| Package | Version | Why it's here |
+|---|---|---|
+| `numpy` | 2.5.4 | The math: arrays, `np.fft.fft`, `np.cumsum`, `np.linalg` |
+| `matplotlib` | 3.11.2 | All the drawing: plots, GIF animation, `Circle` patches |
+| `pillow` | 13.0.0 | GIF writing (matplotlib's `PillowWriter` backend) |
+| `contourpy` | 1.4.0 | Dependency of matplotlib (contour plots) |
+| `cycler` | 0.12.1 | Dependency of matplotlib |
+| `fonttools` | 4.67.0 | Dependency of matplotlib (font handling) |
+| `kiwisolver` | 1.5.1 | Dependency of matplotlib (font cache building) |
+| `packaging` | 26.3 | Dependency of matplotlib (version comparisons) |
+| `pyparsing` | 3.3.3 | Dependency of matplotlib (used by mathtext) |
+| `python-dateutil` | 2.9.0 | Dependency of matplotlib (date handling) |
+| `six` | 1.17.0 | Dependency of python-dateutil |
+| `pip` | 26.2.1 | The package installer itself |
+
+You install **two** packages (`numpy`, `matplotlib`) and pip pulls in the other
+ten as dependencies. That is normal.
+
+### How to check which Python you're running
+
+The venv's Python reports two different paths. This is how you know you're
+inside it:
+
+```powershell
+.\.venv\Scripts\python.exe -c "import sys; print(sys.prefix); print(sys.base_prefix)"
+```
+
+```
+C:\Users\Ramy\Desktop\HQP\Drawing-Equation\.venv   ← prefix (venv)
+C:\Python315                                       ← base_prefix (system)
+```
+
+If the two lines are **identical**, you are running the system Python and the
+venv's packages are invisible to you.
+
+### Activating the venv (optional but convenient)
+
+Activation doesn't install anything — it just temporarily rewires your shell so
+that the bare word `python` means the venv's `python.exe`.
+
+```powershell
+Set-ExecutionPolicy -Scope Process -ExecutionPolicy RemoteSigned -Force   # once per shell
+cd C:\Users\Ramy\Desktop\HQP\Drawing-Equation
+.\.venv\Scripts\Activate.ps1
+```
+
+Your prompt changes to show `(.venv)`. Now `python` and `pip` point at the
+venv:
+
+```powershell
+python main.py --shape crown --static
+pip install numpy
+```
+
+Leave with:
+
+```powershell
+deactivate
+```
+
+> `Set-ExecutionPolicy ... -Scope Process` is needed because Windows blocks
+> running PowerShell scripts from the internet by default. `-Scope Process`
+> means "just this terminal window" — it does not change your machine-wide
+> settings.
+
+### Running without activating (the shortcut)
+
+Activation is optional. You can always call the venv's interpreter by full
+path, which is more explicit and works in scripts:
+
+```powershell
+cd C:\Users\Ramy\Desktop\HQP\Drawing-Equation\python
+..\.venv\Scripts\python.exe main.py --shape crown --static
+```
+
+`pip` works the same way:
+
+```powershell
+..\.venv\Scripts\pip.exe install numpy
+```
+
+### Recreating the venv from scratch
+
+If you delete `.venv/`, or clone the repo on a new machine, you rebuild it in
+about a minute. Nothing is lost — `.venv/` holds no source code, only
+third-party binaries.
+
+```powershell
+cd C:\Users\Ramy\Desktop\HQP\Drawing-Equation
+
+# 1. Create the venv at the repo root
+C:\Python315\python.exe -m venv .venv
+
+# 2. Install the two packages you actually need
+.\.venv\Scripts\pip.exe install numpy matplotlib
+
+# 3. Confirm
+.\.venv\Scripts\python.exe -c "import numpy, matplotlib; print('ok')"
+```
+
+Step 1 needs a real interpreter — `C:\Python315\python.exe` is what
+`pyvenv.cfg` records as the base. Using `python -m venv .venv` works too as
+long as that `python` is 3.15.
+
+### Common `.venv` problems
+
+| Symptom | Cause | Fix |
+|---|---|---|
+| `ModuleNotFoundError: No module named 'numpy'` | You're running the system Python, not the venv's | Use `..\.venv\Scripts\python.exe` from `python/`, or activate the venv |
+| `cannot be loaded because running scripts is disabled` | PowerShell execution policy | `Set-ExecutionPolicy -Scope Process -ExecutionPolicy RemoteSigned -Force` |
+| `The term '.\.venv\Scripts\Activate.ps1' is not recognized` | You're in the wrong directory | `cd` to the repo root first |
+| `No module named venv` | Python installed without the `venv` module | Reinstall Python with the optional features |
+| `Access is denied` on `pip install` | You tried a global install | Use the venv's `pip.exe` |
+| Venv seems "empty" in the file explorer | Windows Explorer hides some folders by default, and the `.` prefix makes it hidden-ish | Use `dir /a` in PowerShell, or enable "Hidden items" in View → Show |
 
 ---
 
@@ -80,7 +311,7 @@ python main.py --shape heart --static --animate
 ```
 
 Output lands in `output/`. There is no pop-up window — `main.py` forces
-matplotlib's `Agg` backend (line 25) so it renders straight to files.
+matplotlib's `Agg` backend (`main.py` line 25) so it renders straight to files.
 
 ### If you don't want to activate the venv
 
@@ -111,6 +342,52 @@ Two gotchas worth knowing:
 
 ---
 
+## The end-to-end data flow
+
+This is the whole program in one picture:
+
+```
+  shapes.py                      fourier.py                   main.py
+  ─────────                      ─────────                   ───────
+  crown(512)
+     │  resample by arc length
+     │  normalize to [-1,1]²
+     ▼
+  points: (512, 2)  ─────────►  coefficients(points)
+  x₁ y₁ x₂ y₂ …                   │
+                                  │  z = x + iy
+                                  │  coeffs = fft(z)/N
+                                  │  freqs  = fftfreq(N, 1/N)
+                                  │  sort by |coeffs| desc
+                                  ▼
+                            coeffs (512,)  freqs (512,)
+                            c₀ = 0.736 + 0.105j  @ freq +1
+                            c₁ = 0.248 - …       @ freq +2
+                            …
+                    ┌─────────────┴─────────────┐
+                    ▼                           ▼
+        reconstruct(coeffs, freqs, θ)   chain(coeffs, freqs, θ, m)
+        → one point per angle             → joint positions of the chain
+        (used by the STATIC image)       (used by the ANIMATION)
+                    │                           │
+                    ▼                           ▼
+        plot 3 / 8 / 20 / 60 terms       circles + spokes + trail
+        → crown_static.png               → crown_epicycles.gif
+```
+
+Two different reconstruction helpers exist because the two outputs need
+different things:
+
+- The **static image** wants the whole curve at once → `reconstruct` evaluates
+  the sum at 512 angles in one matrix product.
+- The **animation** wants to know where each *joint* of the chain is, frame by
+  frame → `chain` returns the cumulative sum, whose last entry is the pen tip.
+
+Both produce the same pen-tip position for the same `θ`. They differ only in
+how the result is packaged.
+
+---
+
 ## The math
 
 ### 1. Represent the outline as a complex signal
@@ -136,6 +413,29 @@ the reconstruction is distorted.
 accumulates distance along the perimeter, then picks `n` points at equal
 *arc-length* intervals by interpolating inside the right segment
 (`shapes.py` lines 12–25). This is why a triangle and a circle both behave well.
+
+Step by step:
+
+```python
+v = np.vstack([vertices, vertices[0]])   # close the loop
+seg = np.diff(v, axis=0)                 # edge vectors
+seg_len = np.hypot(seg[:, 0], seg[:, 1]) # edge lengths
+cum = np.concatenate([[0.0], np.cumsum(seg_len)])  # distance at each vertex
+total = cum[-1]                          # perimeter
+```
+
+then for each target distance `d` (evenly spread over `[0, total)`):
+
+```python
+j = min(int(np.searchsorted(cum, d, side="right") - 1), len(seg) - 1)
+frac = (d - cum[j]) / seg_len[j]
+out[i] = v[j] + frac * seg[j]            # linear interpolation inside edge j
+```
+
+`np.searchsorted` finds which edge contains `d`; `frac` says how far along that
+edge we are; the last line slides the point along the edge. Because the
+targets are evenly spaced in distance, the samples are evenly spaced in
+arc length — which is exactly what the DFT wants.
 
 `_normalize` then centres the shape at the origin and scales it to fit inside
 roughly `[-1, 1]²`, so every shape renders at a comparable size.
@@ -172,6 +472,23 @@ biggest ones is the best possible approximation under the standard squared-error
 measure. This is why truncating the series degrades gracefully instead of
 falling apart.
 
+Here are the first eight circles for the crown (measured, not guessed):
+
+| Circle | `\|c_k\|` (radius) | frequency | start angle |
+|---:|---:|---:|---:|
+| 0 | 0.736110 | +1 | −2.3329 rad |
+| 1 | 0.248185 | +2 | −3.0951 rad |
+| 2 | 0.125077 | +4 | −1.4778 rad |
+| 3 | 0.118099 | −1 | +2.3330 rad |
+| 4 | 0.107031 | −4 | −1.6638 rad |
+| 5 | 0.070333 | −5 | +2.2400 rad |
+| 6 | 0.048050 | +5 | +0.9016 rad |
+| 7 | 0.045686 | −2 | +3.0951 rad |
+
+The first circle alone is a big circle of radius 0.736 — that is the shape's
+overall size and position. Everything after it adds progressively finer
+detail.
+
 ### 5. Reconstruction
 
 ```
@@ -186,8 +503,8 @@ return np.exp(1j * f[None, :] * theta[:, None]) @ c
 
 That `@` is a matrix product: build an `(angles × terms)` matrix of complex
 exponentials, multiply by the `(terms,)` vector of coefficients, and out comes
-one reconstructed point per angle. `reconstruct` is used for the **static** image,
-where you want the whole curve at once.
+one reconstructed point per angle. `reconstruct` is used for the **static**
+image, where you want the whole curve at once.
 
 ### 6. The epicycle chain
 
@@ -219,7 +536,12 @@ RMSE = sqrt( mean( |true − approx|² ) )
 Same-angles comparison matters — comparing at different angles would measure
 phase misalignment rather than shape error.
 
-### Verified accuracy (crown, 512 samples)
+### Verified accuracy
+
+All numbers below were re-measured from the current code and are reproducible
+with the one-liner in the next section.
+
+**Crown, 512 samples** (sharp corners → slow convergence):
 
 | Terms | RMSE |
 |------:|-----:|
@@ -235,14 +557,40 @@ phase misalignment rather than shape error.
 | 320 | 0.000215 |
 | 512 | 0.000000 (exact) |
 
-Two things to notice:
+**All four presets, side by side:**
+
+| Shape | 1 term | 3 terms | 8 terms | 20 terms | 60 terms |
+|---|---:|---:|---:|---:|---:|
+| crown | 0.340229 | 0.196254 | 0.061400 | 0.015410 | 0.003405 |
+| star | 0.173610 | 0.020671 | 0.006100 | 0.001523 | 0.000305 |
+| heart | 0.283637 | 0.166378 | 0.000000 | 0.000000 | 0.000000 |
+| infinity | 0.492586 | 0.204036 | 0.018946 | 0.000096 | 0.000000 |
+
+Three things to notice:
 
 - **Exact at 512 = N.** With as many terms as samples, the reconstruction is
   perfect. This is a property of the DFT, not a coincidence.
 - **Sharp corners converge slowly.** The crown's spikes need many terms because a
   corner is mathematically "infinitely sharp". Near a corner you'll see
-  overshoot ripples — the **Gibbs phenomenon**. The heart, being smooth, needs
-  far fewer terms for the same RMSE. Try it and compare.
+  overshoot ripples — the **Gibbs phenomenon**.
+- **The heart is nearly free.** `heart` is *defined* by a sum of cosines
+  (`shapes.py` lines 65–66), so it is already a Fourier series — its DFT
+  coefficients are almost exactly the handful of cosines you started with. It
+  reaches zero error by 8 terms while the crown is still at 0.06.
+
+Reproduce the table yourself from the repo root:
+
+```powershell
+.\.venv\Scripts\python.exe -c "
+import sys; sys.path.insert(0, 'python')
+from shapes import SHAPES
+from fourier import coefficients, rmse
+for name in SHAPES:
+    pts = SHAPES[name]()
+    c, f = coefficients(pts)
+    print(name, ' '.join(f'{t}:{rmse(pts,c,f,t):.6f}' for t in [1,3,8,20,60]))
+"
+```
 
 ---
 
@@ -281,6 +629,16 @@ The trail is drawn twice: a 5px-wide line at alpha `0.16` underneath, and a
 finished shape over one loop, then resets when `frames` wraps around.
 
 Frames are saved at 30 fps through `PillowWriter`, so no ffmpeg is required.
+
+### Output files
+
+| File | Produced by | Contents |
+|---|---|---|
+| `output/<shape>_static.png` | `--static` | 4 side-by-side panels (3/8/20/60 terms) with per-panel RMSE |
+| `output/<shape>_epicycles.gif` | `--animate` | One loop of the spinning epicycle chain with a growing trail |
+
+Both are overwritten each run. `output/` is git-ignored, so the repo stays
+clean; if you delete it, just run the tool again.
 
 ---
 
@@ -335,7 +693,7 @@ def blob(n: int = 512) -> np.ndarray:
     return _normalize(np.column_stack([r * np.cos(t), r * np.sin(t)]))
 ```
 
-This is the pattern `heart` and `infinity` already use (`shapes.py` lines 62–76).
+The pattern `heart` and `infinity` already use (`shapes.py` lines 62–76).
 Use it when you have a neat equation; use the polygon style when you're tracing
 a silhouette by hand.
 
@@ -364,8 +722,8 @@ python main.py --shape bird --static --animate
 ```
 
 That's it. `main.py` needs **no changes** — its `--shape` argument is already
-built from `sorted(SHAPES)` (`main.py` line 129), so the new shape shows up in
-`--help` and in the "invalid choice" error message automatically.
+built from `sorted(SHAPES)` (`main.py` line 129), so the new shape shows up
+in `--help` and in the "invalid choice" error message automatically.
 
 ### Checklist
 
@@ -409,6 +767,9 @@ These are settled; change them deliberately, not by accident.
 
 **Backend:** `Agg` — always writes files, never opens a blocking window.
 
+**Sample count:** 512 for every shape. Large enough that the DFT is accurate,
+small enough that the matrix product in `reconstruct` is instant.
+
 **Cosmetic note:** `_bare_axes` (lines 45–55) sets `set_aspect("equal")`. Without
 it the shapes would look stretched, because data coordinates wouldn't match
 screen coordinates.
@@ -432,15 +793,22 @@ The math maps over directly: complex numbers in JS become `{re, im}` pairs or
 plain `Float64Array` pairs, `np.fft.fft` becomes a hand-written DFT (fine at
 `N = 512`), and `cumsum` is a running sum in the draw loop.
 
+The web app will need no virtual environment — it's plain HTML/CSS/JS served
+statically, which is exactly why GitHub Pages is the eventual home for it.
+
 ---
 
 ## Troubleshooting
 
-| Symptom | Cause |
-|---|---|
-| `can't open file ...\Scripts\main.py` | You're not in the `python` folder |
-| `invalid choice: 'bird'` | Shape isn't registered in the `SHAPES` dict |
-| `ModuleNotFoundError: numpy` | Wrong Python — use the venv one |
-| Nothing appears on screen | Expected: output goes to `output/` as files |
-| Shape looks like a bow-tie | Vertices out of order, or first vertex repeated |
-| Shape looks squashed | Something bypassed `_normalize`, or `set_aspect("equal")` was removed |
+| Symptom | Cause | Fix |
+|---|---|---|
+| `can't open file ...\Scripts\main.py` | You're not in the `python` folder | `cd` into `Drawing-Equation\python` |
+| `ModuleNotFoundError: numpy` | Running the system Python, not the venv's | Use `..\.venv\Scripts\python.exe`, or activate the venv |
+| `cannot be loaded because running scripts is disabled` | PowerShell execution policy | `Set-ExecutionPolicy -Scope Process -ExecutionPolicy RemoteSigned -Force` |
+| `The term '.\.venv\Scripts\Activate.ps1' is not recognized` | Wrong directory | `cd` to the repo root — `.venv` is one level up from `python/` |
+| `invalid choice: 'bird'` | Shape isn't registered in the `SHAPES` dict | Add it to `SHAPES` in `shapes.py` |
+| Nothing appears on screen | Expected: output goes to `output/` as files | Open `output/<shape>_static.png` |
+| Shape looks like a bow-tie | Vertices out of order, or first vertex repeated | Reorder the vertex list; don't repeat the first point |
+| Shape looks squashed | Something bypassed `_normalize`, or `set_aspect("equal")` was removed | Route every shape through `_normalize` |
+| Animation is slow with many terms | Every circle is a separate matplotlib `Circle` patch | Cap `--terms` around 32–60 |
+| `output/` is huge | GIFs are uncompressed-ish video | Delete `output/`; it regenerates |

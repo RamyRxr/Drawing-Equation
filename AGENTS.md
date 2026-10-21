@@ -39,8 +39,10 @@ math → polished, shareable **web app** with great animation.
 ```
 Drawing-Equation/
 ├── AGENTS.md          ← this file (project memory)
-├── README.md
+├── EXPLANATION.md     ← full guide: idea, layout, .venv, math, how to add shapes
+├── README.md          ← short front door, points at EXPLANATION.md
 ├── .gitignore         ← ignores .venv/, __pycache__/, output/
+├── .venv/             ← virtual environment at the REPO ROOT (not inside python/)
 ├── python/
 │   ├── shapes.py      ← crown, star, heart, infinity; arc-length resampling
 │   ├── fourier.py     ← DFT coefficients, reconstruct, chain, rmse
@@ -126,6 +128,29 @@ the "why" of each part and tie it back to the math. When building new code,
 favor small, reviewable steps and keep the animation quality high.
 
 ## Session log (newest first)
+
+### 2026-10-21 — EXPLANATION.md rewrite: `.venv` documented
+- Rewrote `EXPLANATION.md` (446 → ~560 lines). Main gap fixed: **`.venv` was
+  never mentioned** in the repo layout.
+- New section 3 "The virtual environment (`.venv`)" covers: what a venv solves,
+  that it lives at the **repo root** (not `python/`), full internal anatomy
+  (`pyvenv.cfg`, `Scripts/`, `Lib/site-packages/`, `Include/`, `share/`,
+  internal `.gitignore`), the exact installed package list with versions, how
+  to detect the venv via `sys.prefix != sys.base_prefix`, activation, the
+  `..\.venv\Scripts\python.exe` shortcut, full rebuild procedure, and a table of
+  common venv failure modes.
+- Added: table of contents, end-to-end data-flow diagram (shapes → fourier →
+  main), repo-layout table with Git-tracked status per folder, per-shape RMSE
+  comparison table (crown/star/heart/infinity at 1/3/8/20/60 terms), the first
+  8 crown circles with measured radii + frequencies + start angles, expanded
+  `_resample_polygon` walkthrough, output-file reference table, expanded
+  troubleshooting table.
+- **Fixed a real bug in `README.md`**: it said to create the venv inside
+  `python/` (`cd python; python -m venv .venv`), which contradicts the actual
+  layout. Now documents the repo-root venv and `..\.venv\Scripts\python.exe`.
+- All RMSE numbers re-measured from current code and confirmed unchanged.
+- Verified every documented command runs: `--static`, `--animate`, the
+  `..\.venv\Scripts\python.exe` form, and the activation form.
 
 ### 2026-10-20 — Python prototype + code walkthrough
 - Built the Python prototype: `python/shapes.py`, `python/fourier.py`,
