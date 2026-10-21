@@ -29,7 +29,8 @@ import numpy as np
 from matplotlib.animation import FuncAnimation, PillowWriter
 from matplotlib.patches import Circle
 
-from fourier import chain, coefficients, reconstruct, rmse
+from fourier import chain, coefficients, reconstruct, relative_error, rmse
+from panels import plot_panels
 from shapes import SHAPES
 
 OUT = Path(__file__).resolve().parent.parent / "output"
@@ -61,14 +62,21 @@ def plot_static(points, coeffs, freqs, term_options, shape_name: str) -> Path:
     true = points[:, 0] + 1j * points[:, 1]
     lim = float(np.max(np.abs(points))) * 1.15
 
-    fig, axes = plt.subplots(1, len(term_options), figsize=(4 * len(term_options), 4.4))
+    fig, axes = plt.subplots(1, len(term_options), figsize=(4 * len(term_options), 4.8))
     fig.patch.set_facecolor(BG)
 
     for ax, terms in zip(np.atleast_1d(axes), term_options):
         approx = reconstruct(coeffs, freqs, theta, terms)
-        _bare_axes(ax, lim, f"{terms} terms   RMSE {rmse(points, coeffs, freqs, terms):.4f}")
+        err = relative_error(points, coeffs, freqs, terms)
+        _bare_axes(ax, lim, f"RMSE {rmse(points, coeffs, freqs, terms):.4f}")
         ax.plot(true.real, true.imag, "--", color=GRID, lw=1.2)
         ax.plot(approx.real, approx.imag, color=MINT, lw=2.2)
+
+        # Same under-graph labels as the multi-panel animation.
+        ax.text(0.5, -0.075, f"N = {terms}", transform=ax.transAxes, ha="center",
+                va="top", color=MINT, fontsize=14, fontweight="bold")
+        ax.text(0.5, -0.135, f"Error = {err:.2f} %", transform=ax.transAxes, ha="center",
+                va="top", color=INK, fontsize=10)
 
     fig.suptitle(f"Fourier reconstruction — {shape_name}", color="white", fontsize=13)
     fig.tight_layout()
@@ -131,13 +139,33 @@ def main() -> None:
     ap.add_argument("--animate", action="store_true", help="save the epicycle animation as GIF")
     ap.add_argument("--terms", type=int, default=32, help="epicycles used in the animation")
     ap.add_argument("--frames", type=int, default=100, help="frames in one full loop")
+    ap.add_argument(
+        "--panels",
+        type=str,
+        default=None,
+        metavar="N,N,N",
+        help="multi-panel animation: comma-separated term counts, e.g. 2,8,32,128",
+    )
+    ap.add_argument(
+        "--freeze",
+        type=int,
+        default=2,
+        help="how many of the largest circles are drawn static (0 = every circle spins)",
+    )
     args = ap.parse_args()
 
     OUT.mkdir(parents=True, exist_ok=True)
     points = SHAPES[args.shape]()
     coeffs, freqs = coefficients(points)
 
-    if args.static or not args.animate:
+    if args.panels:
+        term_list = [int(x) for x in args.panels.replace(" ", "").split(",") if x]
+        for out in plot_panels(
+            points, coeffs, freqs, args.shape, term_list, args.frames, args.freeze, OUT
+        ):
+            print(f"saved {out}")
+
+    if args.static or (not args.animate and not args.panels):
         out = plot_static(points, coeffs, freqs, [3, 8, 20, 60], args.shape)
         print(f"saved {out}")
     if args.animate:

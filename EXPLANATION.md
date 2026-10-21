@@ -18,13 +18,14 @@ If you only read one section, read
 3. [The virtual environment (`.venv`)](#the-virtual-environment-venv)
 4. [Quick start](#quick-start)
 5. [Command-line options](#command-line-options)
-6. [The end-to-end data flow](#the-end-to-end-data-flow)
-7. [The math](#the-math)
-8. [How the rendering works](#how-the-rendering-works)
-9. [How to add a new shape](#how-to-add-a-new-shape)
-10. [Design decisions already locked in](#design-decisions-already-locked-in)
-11. [Porting to the web (`web/`, not started)](#porting-to-the-web-web-not-started)
-12. [Troubleshooting](#troubleshooting)
+6. [The multi-panel animation (`--panels`)](#the-multi-panel-animation---panels)
+7. [The end-to-end data flow](#the-end-to-end-data-flow)
+8. [The math](#the-math)
+9. [How the rendering works](#how-the-rendering-works)
+10. [How to add a new shape](#how-to-add-a-new-shape)
+11. [Design decisions already locked in](#design-decisions-already-locked-in)
+12. [Porting to the web (`web/`, not started)](#porting-to-the-web-web-not-started)
+13. [Troubleshooting](#troubleshooting)
 
 ---
 
@@ -67,21 +68,24 @@ Drawing-Equation/
 │   ├── __pycache__/           compiled .pyc cache (git-ignored, auto-created)
 │   ├── shapes.py              shape definitions + arc-length resampling
 │   ├── fourier.py             the math: DFT, reconstruction, epicycle chain, RMSE
-│   └── main.py                CLI: writes the static PNG and the animated GIF
+│   ├── panels.py              multi-panel animation: one shape, many term counts
+│   └── main.py                CLI: writes the static PNG, the GIF and the MP4
 │
 ├── .gitignore                 ignores .venv/, __pycache__/, output/
+├── requirements.txt           pinned package versions
 ├── AGENTS.md                  project memory (status, decisions, verified numbers)
 ├── EXPLANATION.md             ← you are here
 └── README.md                  short front door — points at this file
 ```
 
-### The three Python files, one job each
+### The Python files, one job each
 
 | File | Responsibility | Knows about |
 |---|---|---|
 | `shapes.py` | Produce a shape as an `(N, 2)` array of points | NumPy only |
 | `fourier.py` | Turn those points into coefficients and back again | NumPy only |
-| `main.py` | Command-line interface + all the drawing/rendering | Matplotlib |
+| `panels.py` | Draw the multi-panel animation (GIF + MP4) | Matplotlib |
+| `main.py` | Command-line interface; owns the static PNG and single-shape GIF | Matplotlib |
 
 `fourier.py` **never touches matplotlib**. `main.py` **never does math** beyond
 calling `fourier.py`. Keeping the math pure is what makes it testable and
@@ -93,10 +97,10 @@ translated to `dft.js` one-to-one with no drawing code in the way.
 | Folder | In Git? | Why |
 |---|---|---|
 | `python/` | ✅ yes | this is the actual source code |
-| `AGENTS.md`, `README.md`, `EXPLANATION.md` | ✅ yes | documentation |
+| `AGENTS.md`, `README.md`, `EXPLANATION.md`, `requirements.txt` | ✅ yes | documentation + dependency pins |
 | `.gitignore` | ✅ yes | tells Git what to skip |
 | `.venv/` | ❌ **no** | 133 MB of third-party binaries — machine-specific, regenerated on demand |
-| `output/` | ❌ **no** | build artifacts — 2 MB of PNGs/GIFs you can regenerate |
+| `output/` | ❌ **no** | build artifacts — PNGs/GIFs/MP4s you can regenerate |
 | `python/__pycache__/` | ❌ **no** | Python's byte-code cache, rebuilt automatically |
 | `.git/` | ❌ **no** | Git's internals |
 
@@ -328,17 +332,117 @@ From the `python` folder:
 | `--shape NAME` | one of `crown`, `star`, `heart`, `infinity` | `crown` |
 | `--static` | save an N-terms comparison PNG | off |
 | `--animate` | save the epicycle animation GIF | off |
-| `--terms N` | epicycles used **in the animation only** | `32` |
-| `--frames N` | frames per full loop **in the animation only** | `100` |
+| `--panels N,N,N` | save the **multi-panel** animation (GIF + MP4) | off |
+| `--freeze N` | how many of the largest circles are drawn **static** | `2` |
+| `--terms N` | epicycles used **in the `--animate` GIF only** | `32` |
+| `--frames N` | frames per full loop | `100` |
 
-Two gotchas worth knowing:
+Three gotchas worth knowing:
 
 - `--shape` takes exactly **one** value. `--shape bird heart` is an error, not
   "two shapes".
-- `--terms` does **not** affect the static image. The static image always uses
-  the hardcoded list `[3, 8, 20, 60]` (`main.py` line 141).
-- If you pass **neither** flag you get the static image anyway, because line 140
-  reads `if args.static or not args.animate`.
+- `--terms` does **not** affect the static image or the panel animation. The
+  static image always uses the hardcoded list `[3, 8, 20, 60]`; the panel
+  animation uses whatever list you pass to `--panels`.
+- If you pass **neither** `--static`, `--animate` nor `--panels`, you get the
+  static image anyway.
+
+---
+
+## The multi-panel animation (`--panels`)
+
+This is the mode that shows the idea most clearly: **the same shape drawn
+several times at once, each with a different number of Fourier terms**, so you
+can watch the approximation tighten left to right.
+
+```powershell
+cd C:\Users\Ramy\Desktop\HQP\Drawing-Equation\python
+..\.venv\Scripts\python.exe main.py --shape crown --panels 2,8,32,128
+```
+
+You get **two** files in `output/`:
+
+| File | Format | Notes |
+|---|---|---|
+| `crown_panels.gif` | GIF, 1600×500, 100 frames @ 30 fps | via Pillow |
+| `crown_panels.mp4` | MP4 (H.264 / yuv420p), 1600×500, 30 fps | via ffmpeg |
+
+The MP4 is written **without needing ffmpeg installed on your machine**:
+`imageio-ffmpeg` ships its own ffmpeg binary inside the venv, and
+`panels.py` points matplotlib at it with
+`matplotlib.rcParams["animation.ffmpeg_path"]`.
+
+### What you see
+
+Four panels side by side. Each one:
+
+- draws the **true** outline as a faint dotted guide (`GRID` colour)
+- draws its own chain of epicycles with spokes
+- trails a glowing mint line behind the white pen tip
+- carries **two labels under the graph**:
+
+```
+N = 32            <- mint, bold
+Error = 0.98 %    <- ink
+```
+
+### The error percentage
+
+`fourier.py::relative_error` turns the raw RMSE into a percentage you can
+compare across shapes:
+
+```
+error % = 100 * RMSE / (RMS radius of the true outline)
+```
+
+The denominator is the shape's own typical distance from its centre. Without
+it, the raw RMSE would be "in shape units" and a big shape would look worse
+than a small one for no good reason.
+
+Measured values for the crown:
+
+| N | Error |
+|---:|---:|
+| 2 | 28.70 % |
+| 8 | 7.57 % |
+| 32 | 0.98 % |
+| 128 | 0.13 % |
+
+### The two static "main" circles (`--freeze`)
+
+`--freeze 2` (the default) holds the **two largest circles still** while every
+smaller circle spins. They are drawn dashed and brighter (`#7fb8d4`) so they
+read as a fixed scaffold; the animated circles are solid and dimmer
+(`#3a6d8c`).
+
+**This is a purely visual choice.** The frozen circles are held at their
+`θ = 0` pose, but the pen still traces the *exact* N-term reconstruction, so
+the error printed under each panel is the true mathematical error.
+
+> **Why not freeze their actual contribution instead?**
+> Because it does not work. Holding the two biggest terms at `θ = 0` was
+> measured at **~150 % error for every N**, and — critically — it never
+> improved as N grew, because the two largest terms are the low-frequency
+> ones that carry the shape's overall size and position. Freezing them
+> removes the shape. The freeze has to live in the rendering, not the maths.
+
+Use `--freeze 0` for the classic look where every circle spins.
+
+### Choosing the N values
+
+The list is whatever you pass, so you are not stuck with four panels:
+
+```powershell
+# wide spread
+..\.venv\Scripts\python.exe main.py --shape crown --panels 1,3,60,512
+
+# just two
+..\.venv\Scripts\python.exe main.py --shape heart --panels 4,64
+```
+
+Panel width scales with the number of panels (`4.0` inches each), so more
+panels means a wider output. Values above 512 are clamped to the number of
+available coefficients.
 
 ---
 
@@ -347,13 +451,13 @@ Two gotchas worth knowing:
 This is the whole program in one picture:
 
 ```
-  shapes.py                      fourier.py                   main.py
-  ─────────                      ─────────                   ───────
+  shapes.py                      fourier.py                   main.py / panels.py
+  ─────────                      ─────────                   ─────────────────
   crown(512)
      │  resample by arc length
      │  normalize to [-1,1]²
      ▼
-  points: (512, 2)  ─────────►  coefficients(points)
+  points: (N, 2)  ─────────►  coefficients(points)
   x₁ y₁ x₂ y₂ …                   │
                                   │  z = x + iy
                                   │  coeffs = fft(z)/N
@@ -362,17 +466,19 @@ This is the whole program in one picture:
                                   ▼
                             coeffs (512,)  freqs (512,)
                             c₀ = 0.736 + 0.105j  @ freq +1
-                            c₁ = 0.248 - …       @ freq +2
+                            c₁ = 0.248 − …       @ freq +2
                             …
                     ┌─────────────┴─────────────┐
                     ▼                           ▼
         reconstruct(coeffs, freqs, θ)   chain(coeffs, freqs, θ, m)
         → one point per angle             → joint positions of the chain
-        (used by the STATIC image)       (used by the ANIMATION)
+        (used by the STATIC image)       (used by every ANIMATION)
                     │                           │
                     ▼                           ▼
-        plot 3 / 8 / 20 / 60 terms       circles + spokes + trail
-        → crown_static.png               → crown_epicycles.gif
+        plot 3 / 8 / 20 / 60 terms       panels.py: one panel per N,
+        → crown_static.png               each with its own chain,
+                                         trail and error label
+                                         → crown_panels.gif / .mp4
 ```
 
 Two different reconstruction helpers exist because the two outputs need
@@ -380,8 +486,8 @@ different things:
 
 - The **static image** wants the whole curve at once → `reconstruct` evaluates
   the sum at 512 angles in one matrix product.
-- The **animation** wants to know where each *joint* of the chain is, frame by
-  frame → `chain` returns the cumulative sum, whose last entry is the pen tip.
+- Every **animation** wants to know where each *joint* of the chain is, frame
+  by frame → `chain` returns the cumulative sum, whose last entry is the pen tip.
 
 Both produce the same pen-tip position for the same `θ`. They differ only in
 how the result is packaged.
@@ -634,10 +740,12 @@ Frames are saved at 30 fps through `PillowWriter`, so no ffmpeg is required.
 
 | File | Produced by | Contents |
 |---|---|---|
-| `output/<shape>_static.png` | `--static` | 4 side-by-side panels (3/8/20/60 terms) with per-panel RMSE |
-| `output/<shape>_epicycles.gif` | `--animate` | One loop of the spinning epicycle chain with a growing trail |
+| `output/<shape>_static.png` | `--static` | 4 side-by-side panels (3/8/20/60 terms), each labelled with `N` and `Error %` |
+| `output/<shape>_epicycles.gif` | `--animate` | One loop of a single spinning epicycle chain with a growing trail |
+| `output/<shape>_panels.gif` | `--panels` | The multi-panel animation, as a GIF |
+| `output/<shape>_panels.mp4` | `--panels` | The same animation, as an H.264 MP4 |
 
-Both are overwritten each run. `output/` is git-ignored, so the repo stays
+All are overwritten each run. `output/` is git-ignored, so the repo stays
 clean; if you delete it, just run the tool again.
 
 ---
@@ -759,9 +867,10 @@ These are settled; change them deliberately, not by accident.
 | `BG` | `#0b0b12` | background |
 | `GRID` | `#333355` | true-outline guide |
 | `INK` | `#c8c8e0` | titles / text |
-| `MINT` | `#00ffcc` | reconstruction + trail |
-| `CIRCLE` | `#3a6d8c` | epicycle circles |
+| `MINT` | `#00ffcc` | reconstruction + trail + the `N` label |
+| `CIRCLE` | `#3a6d8c` | epicycle circles (dimmed) |
 | `SPOKE` | `#4d7a99` | epicycle spokes |
+| `FROZEN` | `#7fb8d4` | the two "main" circles held static (dashed, brighter) — `panels.py` only |
 
 **Animation:** 30 fps, glow underlay plus bright trail line plus white pen tip.
 
@@ -807,6 +916,7 @@ statically, which is exactly why GitHub Pages is the eventual home for it.
 | `cannot be loaded because running scripts is disabled` | PowerShell execution policy | `Set-ExecutionPolicy -Scope Process -ExecutionPolicy RemoteSigned -Force` |
 | `The term '.\.venv\Scripts\Activate.ps1' is not recognized` | Wrong directory | `cd` to the repo root — `.venv` is one level up from `python/` |
 | `invalid choice: 'bird'` | Shape isn't registered in the `SHAPES` dict | Add it to `SHAPES` in `shapes.py` |
+| `skipped MP4 (...)` | ffmpeg not reachable | `pip install imageio-ffmpeg` inside the venv — it bundles its own binary |
 | Nothing appears on screen | Expected: output goes to `output/` as files | Open `output/<shape>_static.png` |
 | Shape looks like a bow-tie | Vertices out of order, or first vertex repeated | Reorder the vertex list; don't repeat the first point |
 | Shape looks squashed | Something bypassed `_normalize`, or `set_aspect("equal")` was removed | Route every shape through `_normalize` |

@@ -68,3 +68,18 @@ def rmse(points: np.ndarray, coeffs: np.ndarray, freqs: np.ndarray, terms: int) 
     true = points[:, 0] + 1j * points[:, 1]
     approx = reconstruct(coeffs, freqs, theta, terms)
     return float(np.sqrt(np.mean(np.abs(true - approx) ** 2)))
+
+
+def relative_error(
+    points: np.ndarray, coeffs: np.ndarray, freqs: np.ndarray, terms: int
+) -> float:
+    """Reconstruction error as a **percentage** of the shape's own size.
+
+    The raw RMSE is measured in shape units, so it is not comparable between
+    a big shape and a small one. Dividing by the RMS distance of the true
+    outline from its centre turns it into "how wrong is the drawing, as a
+    percentage of the drawing's typical radius?".
+    """
+    z = points[:, 0] + 1j * points[:, 1]
+    radius = float(np.sqrt(np.mean(np.abs(z - z.mean()) ** 2))) or 1.0
+    return 100.0 * rmse(points, coeffs, freqs, terms) / radius

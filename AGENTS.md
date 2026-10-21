@@ -39,17 +39,21 @@ math → polished, shareable **web app** with great animation.
 ```
 Drawing-Equation/
 ├── AGENTS.md          ← this file (project memory)
-├── EXPLANATION.md     ← full guide: idea, layout, .venv, math, how to add shapes
+├── EXPLANATION.md     ← full guide: idea, layout, .venv, math, panels, shapes
 ├── README.md          ← short front door, points at EXPLANATION.md
+├── requirements.txt   ← pinned versions (numpy, matplotlib, pillow, imageio)
 ├── .gitignore         ← ignores .venv/, __pycache__/, output/
 ├── .venv/             ← virtual environment at the REPO ROOT (not inside python/)
 ├── python/
 │   ├── shapes.py      ← crown, star, heart, infinity; arc-length resampling
-│   ├── fourier.py     ← DFT coefficients, reconstruct, chain, rmse
-│   └── main.py        ← CLI: static comparison PNG + epicycle GIF
+│   ├── fourier.py     ← DFT coefficients, reconstruct, chain, rmse, relative_error
+│   ├── panels.py      ← multi-panel animation (GIF + MP4), freeze logic
+│   └── main.py        ← CLI: static PNG, single-shape GIF, panels mode
 ├── output/            ← generated files (git-ignored)
 │   ├── crown_static.png
-│   └── crown_epicycles.gif
+│   ├── crown_epicycles.gif
+│   ├── crown_panels.gif / .mp4
+│   └── heart_panels.gif / .mp4
 └── web/               ← (to build) interactive Canvas app
 ```
 
@@ -128,6 +132,33 @@ the "why" of each part and tie it back to the math. When building new code,
 favor small, reviewable steps and keep the animation quality high.
 
 ## Session log (newest first)
+
+### 2026-10-21 — Multi-panel mode (`--panels`): GIF + MP4, frozen main circles
+- **New mode** `python main.py --shape crown --panels 2,8,32,128` draws the
+  same shape in 4 panels, one per N, each with its own epicycle chain, trail
+  and pen tip. Writes **both** `output/<shape>_panels.gif` and `.mp4`.
+- New file `python/panels.py` (build_figure + plot_panels). `build_figure` is
+  split out so artist state is inspectable in tests without writing files.
+- New `fourier.py::relative_error` → error % = `100 * RMSE / RMS radius of the
+  true outline`, so the number is comparable across shapes. Crown: N=2 → 28.70 %,
+  N=8 → 7.57 %, N=32 → 0.98 %, N=128 → 0.13 %.
+- `--freeze N` (default 2) holds the **two largest circles static** (dashed,
+  brighter `#7fb8d4`); `--freeze 0` gives the classic all-spinning look.
+  **The freeze is visual only** — the pen still traces the exact N-term
+  reconstruction, so the printed error is the true error.
+- **Measured and rejected** the alternative: freezing the two biggest terms'
+  *contribution* gives ~150 % error at every N and never improves (the two
+  biggest terms are the low-frequency ones carrying size/position). It must
+  stay in the rendering, not the maths.
+- Labels under every graph (`N = 32` in mint + `Error = 0.98 %` in ink) were
+  also added to the existing `--static` PNG for consistency.
+- MP4 needs **no system ffmpeg**: `imageio-ffmpeg` ships its own binary inside
+  the venv and `panels.py` points matplotlib at it via
+  `matplotlib.rcParams["animation.ffmpeg_path"]`. Added `imageio`,
+  `imageio-ffmpeg` to the venv and a new `requirements.txt`.
+- Verified programmatically: frozen circles never move, animated circles do,
+  pen tip == `reconstruct()` to 1e-12 in every panel, MP4 is h264/yuv420p
+  1600×500 @30fps, GIF is 1600×500 × 100 frames.
 
 ### 2026-10-21 — EXPLANATION.md rewrite: `.venv` documented
 - Rewrote `EXPLANATION.md` (446 → ~560 lines). Main gap fixed: **`.venv` was
