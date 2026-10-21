@@ -24,6 +24,8 @@ output/           # generated PNG/GIFs — git-ignored
 python/           # prototype: prove the math
   shapes.py       # crown, star, heart, infinity
   fourier.py      # DFT, reconstruction, chain, error
+  panels.py       # multi-panel animation (GIF + MP4)
+  sequence.py     # two-group animation: x(t) chain + y(t) chain -> one pen
   main.py         # static comparison + GIF animation
 web/              # polished interactive app (coming next)
 ```
@@ -95,6 +97,48 @@ still traces the exact N-term reconstruction, so the error shown is real.
 > **New to virtual environments?** See
 > [EXPLANATION.md → The virtual environment](EXPLANATION.md#the-virtual-environment-venv)
 > for what `.venv/` actually contains and how to activate it.
+
+## The two-group animation
+
+`--panels` shows *how accurate* the shape is at a given N. `--sequence` shows
+*how the two halves of the formula build it*: an `x(t)` group of circles and a
+`y(t)` group, separated, driving a single pen.
+
+```powershell
+..\.venv\Scripts\python main.py --shape crown --sequence
+```
+
+```
+|  x(t) chain  |   THE DRAWING   |  y(t) chain  |
+```
+
+- The **left** panel is the epicycle chain of the real signal `x(t)` — its tip
+  slides along the horizontal axis.
+- The **right** panel is the same for `y(t)`, turned a quarter turn so its tip
+  slides up and down the vertical axis.
+- The **middle** panel is the pen at `(x(t), y(t))` drawing the shape, with a
+  dashed line from each group's tip to the pen.
+
+Under the drawing the two formulas are printed with the current step's `N` and
+error percentage, and they are *literally* the series being evaluated:
+
+```
+Step 2 / 4     N = 15     Error = 1.3790 %
+x(t) =  Σ  ( a_k·cos(kt) + b_k·sin(kt) )
+y(t) =  Σ  ( c_k·cos(kt) + d_k·sin(kt) )
+```
+
+The animation walks through four N values and stops at the first one whose
+error is under the target (0.1 % by default) — for the crown:
+6, 15, 40, 102 → 4.55 %, 1.38 %, 0.35 %, **0.09 %**.
+
+| Flag | Meaning | Default |
+|---|---|---|
+| `--sequence` | two-group animation | off |
+| `--step-count N` | how many N steps to walk through | `4` |
+| `--target-error PCT` | the error target in percent | `0.1` |
+| `--frames N` | frames **per step** | `100` |
+| `--tag NAME` | suffix for the output file names | off |
 
 ## The math in one line
 

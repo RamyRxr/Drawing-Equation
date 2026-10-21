@@ -19,13 +19,14 @@ If you only read one section, read
 4. [Quick start](#quick-start)
 5. [Command-line options](#command-line-options)
 6. [The multi-panel animation (`--panels`)](#the-multi-panel-animation---panels)
-7. [The end-to-end data flow](#the-end-to-end-data-flow)
-8. [The math](#the-math)
-9. [How the rendering works](#how-the-rendering-works)
-10. [How to add a new shape](#how-to-add-a-new-shape)
-11. [Design decisions already locked in](#design-decisions-already-locked-in)
-12. [Porting to the web (`web/`, not started)](#porting-to-the-web-web-not-started)
-13. [Troubleshooting](#troubleshooting)
+7. [The two-group animation (`--sequence`)](#the-two-group-animation---sequence)
+8. [The end-to-end data flow](#the-end-to-end-data-flow)
+9. [The math](#the-math)
+10. [How the rendering works](#how-the-rendering-works)
+11. [How to add a new shape](#how-to-add-a-new-shape)
+12. [Design decisions already locked in](#design-decisions-already-locked-in)
+13. [Porting to the web (`web/`, not started)](#porting-to-the-web-web-not-started)
+14. [Troubleshooting](#troubleshooting)
 
 ---
 
@@ -63,6 +64,7 @@ Drawing-Equation/
 │   ├── crown_epicycles.gif    spinning epicycles, 32 circles
 │   ├── crown_panels.gif/.mp4  multi-panel, auto N (last panel under target)
 │   ├── crown_panels_strict.*  multi-panel, every panel under the target
+│   ├── crown_sequence.gif/.mp4 two-group animation: x(t) + y(t) -> one pen
 │   └── <shape>_panels.*       same for star / heart / infinity
 │
 ├── python/                    the prototype
@@ -70,6 +72,7 @@ Drawing-Equation/
 │   ├── shapes.py              shape definitions + arc-length resampling
 │   ├── fourier.py             the math: DFT, reconstruction, epicycle chain, RMSE
 │   ├── panels.py              multi-panel animation: one shape, many term counts
+│   ├── sequence.py            two-group animation: an x(t) chain and a y(t) chain
 │   └── main.py                CLI: writes the static PNG, the GIF and the MP4
 │
 ├── .gitignore                 ignores .venv/, __pycache__/, output/
@@ -86,6 +89,7 @@ Drawing-Equation/
 | `shapes.py` | Produce a shape as an `(N, 2)` array of points | NumPy only |
 | `fourier.py` | Turn those points into coefficients and back again | NumPy only |
 | `panels.py` | Draw the multi-panel animation (GIF + MP4) | Matplotlib |
+| `sequence.py` | Draw the two-group animation: an `x(t)` chain, a `y(t)` chain and one pen | Matplotlib |
 | `main.py` | Command-line interface; owns the static PNG and single-shape GIF | Matplotlib |
 
 `fourier.py` **never touches matplotlib**. `main.py` **never does math** beyond
@@ -313,6 +317,9 @@ python main.py --shape crown --animate --terms 32 --frames 100
 
 # both at once
 python main.py --shape heart --static --animate
+
+# the two-group animation: an x(t) chain and a y(t) chain driving one pen
+python main.py --shape crown --sequence
 ```
 
 Output lands in `output/`. There is no pop-up window — `main.py` forces
@@ -334,20 +341,24 @@ From the `python` folder:
 | `--static` | save an N-terms comparison PNG | off |
 | `--animate` | save the epicycle animation GIF | off |
 | `--panels [LIST]` | multi-panel animation. `auto` (or bare) picks N from the error target; `strict` makes **every** panel beat it; a list uses exactly those N | off |
-| `--target-error PCT` | error target in percent, used by `auto` / `strict` | `0.1` |
+| `--sequence` | two-group animation: an `x(t)` chain and a `y(t)` chain drive one pen, stepping through N values | off |
+| `--step-count N` | how many N steps the `--sequence` animation walks through | `4` |
+| `--target-error PCT` | error target in percent, used by `auto` / `strict` / `--sequence` | `0.1` |
 | `--panel-count N` | how many panels `auto` / `strict` create | `4` |
 | `--freeze N` | how many of the largest circles are drawn **static** | `2` |
 | `--tag NAME` | suffix for the output file names (`crown_panels` → `crown_panels_NAME`) | off |
 | `--terms N` | epicycles used **in the `--animate` GIF only** | `32` |
-| `--frames N` | frames per full loop | `100` |
+| `--frames N` | frames per full loop — in `--sequence` it means frames **per step** | `100` |
 
-Three gotchas worth knowing:
+Four gotchas worth knowing:
 
 - `--shape` takes exactly **one** value. `--shape bird heart` is an error, not
   "two shapes".
 - `--terms` does **not** affect the static image or the panel animation. The
   static image always uses the hardcoded list `[3, 8, 20, 60]`; the panel
   animation uses `--panels` (or the error target).
+- In `--sequence` mode `--frames` counts frames **per step**, so the video is
+  `--frames × --step-count` frames long.
 - If you pass **neither** `--static`, `--animate` nor `--panels`, you get the
   static image anyway.
 
@@ -505,6 +516,133 @@ available coefficients.
 
 ---
 
+## The two-group animation (`--sequence`)
+
+`--panels` answers *"how good is it at N?"*. `--sequence` answers a different
+question: *"how do the two halves of the formula build the shape?"*
+
+```powershell
+cd C:\Users\Ramy\Desktop\HQP\Drawing-Equation\python
+..\.venv\Scripts\python.exe main.py --shape crown --sequence
+```
+
+You get **two** files in `output/`:
+
+| File | Format | Notes |
+|---|---|---|
+| `crown_sequence.gif` | GIF, 1500×840, `--frames × --step-count` frames @ 30 fps | converted from the MP4 |
+| `crown_sequence.mp4` | MP4 (H.264 / yuv420p), 1500×840, 30 fps | via the bundled ffmpeg |
+
+### What you see
+
+Three panels side by side, plus a text row underneath:
+
+```
+|  x(t) chain  |   THE DRAWING   |  y(t) chain  |
+```
+
+- **Left — the `x(t)` group.** The epicycle chain of the *real* signal `x(t)`.
+  Because the `+k` and `-k` circles are drawn as a pair, the running total
+  stays real, so the chain's tip slides **along the horizontal axis** at
+  `x(t)`. A live read-out in the corner shows `x(t) = +0.734`.
+- **Right — the `y(t)` group.** The same construction for `y(t)`, turned a
+  quarter turn so its tip slides **up and down the vertical axis** at `y(t)`.
+  Read-out: `y(t) = -0.152`.
+- **Middle — the drawing.** The pen at `(x(t), y(t))` tracing the shape, with
+  the true outline as a faint dotted guide behind it. A dashed line runs from
+  each chain's tip to the pen, so it is obvious that the two groups feed the
+  same drawing.
+
+The text row underneath carries the two formulas that are being evaluated, the
+current step's `N`, its error percentage, and the history of the steps:
+
+```
+Step 2 / 4     N = 15     Error = 1.3790 %
+x(t) =  Σ  ( a_k·cos(kt) + b_k·sin(kt) )
+y(t) =  Σ  ( c_k·cos(kt) + d_k·sin(kt) )
+✓ N=6 4.55%   ✓ N=15 1.38%   • N=40 0.35%   • N=102 0.09%
+```
+
+### Why the formulas are literally true
+
+The classic real Fourier series of a shape is
+
+```
+x(t) = Σ ( a_k·cos(kt) + b_k·sin(kt) )
+y(t) = Σ ( c_k·cos(kt) + d_k·sin(kt) )
+```
+
+— one **positive** harmonic per index, no negative frequencies. The DFT of the
+complex signal `z = x + iy` gives one coefficient per *signed* frequency, so
+the two halves have to be re-paired before the formulas above hold. For each
+`k > 0`, with `C+ = α+ + iβ+` at frequency `+k` and `C- = α- + iβ-` at `-k`:
+
+```
+a_k =  α+ + α-      b_k = -β+ + β-
+c_k =  β+ + β-      d_k =  α+ - α-
+```
+
+That is `fourier.py::harmonic_coeffs`. Because the re-paired coefficients are
+built from the *same* selected terms the pen uses, the drawing and the
+formulas cannot disagree — a property the test suite checks to 1e-12.
+
+### What "N" means here
+
+`--sequence` uses the **classic Fourier partial sum**: keep every harmonic
+`k = 1..N`, both halves of each pair. So `N` is the highest frequency
+retained, and `Σ_{k=1}^{N}` in the printed formula is exactly what is drawn.
+
+> This is a different meaning of `N` from `--panels`, where `N` counts
+> individual DFT terms (which may be negative frequencies). Both modes print
+> their own true error, but the numbers are not comparable across modes.
+
+### Picking the steps
+
+The last step is the smallest `N` whose error is under the target (with a 5 %
+margin, so the printed number is not sitting on the boundary). The other
+steps are spread geometrically below it, starting from a value low enough
+that the first drawing is visibly rough.
+
+At the default 0.1 % target:
+
+| Shape | steps (N) | errors |
+|---|---|---|
+| crown | 6, 15, 40, 102 | 4.546 %, 1.379 %, 0.352 %, **0.0934 %** |
+| star | 6, 15, 38, 96 | 2.861 %, 1.713 %, 0.372 %, **0.0946 %** |
+| heart | 1, 2, 3, 4 | 35.80 %, 24.19 %, 5.278 %, **0.0000 %** |
+| infinity | 2, 3, 5, 8 | 17.16 %, 7.107 %, 1.219 %, **0.0867 %** |
+
+```powershell
+# six steps instead of four
+..\.venv\Scripts\python.exe main.py --shape crown --sequence --step-count 6
+
+# a tighter target
+..\.venv\Scripts\python.exe main.py --shape crown --sequence --target-error 0.01
+
+# longer per step (the video is frames x steps long)
+..\.venv\Scripts\python.exe main.py --shape crown --sequence --frames 160
+```
+
+### Two rendering tricks worth knowing
+
+**The frames are rendered once.** Matplotlib's `PillowWriter` keeps *every*
+frame in RAM, and a 400-frame animation at 1500×840 would need well over a
+gigabyte. So `sequence.py` writes the MP4 first (streaming) and then converts
+it to a GIF with the bundled ffmpeg:
+
+```
+ffmpeg -i crown_sequence.mp4 -vf "fps=30,split[a][b];[a]palettegen[p];[b][p]paletteuse" crown_sequence.gif
+```
+
+If that conversion ever fails, it falls back to matplotlib's own GIF writer.
+
+**Sub-pixel circles are skipped.** At `N = 102` the crown's chain has 205
+circles, but only a handful are more than a pixel wide. Circles below
+`0.8 %` of the panel's half-width are hidden instead of drawn, which is a
+pure speed-up — an invisible circle stays invisible.
+
+---
+
 ## The end-to-end data flow
 
 This is the whole program in one picture:
@@ -539,18 +677,34 @@ This is the whole program in one picture:
                                          trail and error label
                                          → crown_panels.gif / .mp4
                                          (and _strict for --panels strict)
+
+  ── and for --sequence, one branch further down ──
+
+                            by_frequency(coeffs, freqs)   → {+k: C₊, -k: C₋}
+                                    │
+                                    ▼
+                            harmonic_coeffs(table, k)      → aₖ bₖ cₖ dₖ
+                            harmonic_chains(…, N, frames)  → an x chain and a
+                                    │                      y chain (both real)
+                                    ▼
+                            sequence.py: three panels — the x(t) chain,
+                            the drawing, the y(t) chain — one pen
+                            → crown_sequence.gif / .mp4
 ```
 
-Two different reconstruction helpers exist because the two outputs need
+Three different reconstruction helpers exist because the outputs need
 different things:
 
 - The **static image** wants the whole curve at once → `reconstruct` evaluates
   the sum at 512 angles in one matrix product.
 - Every **animation** wants to know where each *joint* of the chain is, frame
   by frame → `chain` returns the cumulative sum, whose last entry is the pen tip.
+- The **`--sequence` animation** wants the two *halves* of the formula
+  separately → `harmonic_chains` re-pairs the `±k` coefficients and returns
+  two chains whose tips are exactly `x(t)` and `y(t)`.
 
-Both produce the same pen-tip position for the same `θ`. They differ only in
-how the result is packaged.
+All of them produce the same pen-tip position for the same `θ`. They differ
+only in how the result is packaged.
 
 ---
 

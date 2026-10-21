@@ -31,6 +31,7 @@ from matplotlib.patches import Circle
 
 from fourier import chain, coefficients, reconstruct, relative_error, rmse, select_terms
 from panels import format_pct, plot_panels
+from sequence import plot_sequence
 from shapes import SHAPES
 
 OUT = Path(__file__).resolve().parent.parent / "output"
@@ -41,6 +42,13 @@ INK = "#c8c8e0"
 MINT = "#00ffcc"
 CIRCLE = "#3a6d8c"
 SPOKE = "#4d7a99"
+
+
+def _clean_tag(tag: str | None) -> str:
+    """Normalise a ``--tag`` value into a file-name suffix (``""`` or ``_name``)."""
+    if not tag:
+        return ""
+    return tag if tag.startswith("_") else f"_{tag}"
 
 
 def _bare_axes(ax, lim: float, title: str) -> None:
@@ -138,7 +146,12 @@ def main() -> None:
     ap.add_argument("--static", action="store_true", help="save an N-terms comparison image")
     ap.add_argument("--animate", action="store_true", help="save the epicycle animation as GIF")
     ap.add_argument("--terms", type=int, default=32, help="epicycles used in the animation")
-    ap.add_argument("--frames", type=int, default=100, help="frames in one full loop")
+    ap.add_argument(
+        "--frames",
+        type=int,
+        default=100,
+        help="frames in one full loop (frames *per step* in --sequence mode)",
+    )
     ap.add_argument(
         "--panels",
         type=str,
@@ -178,11 +191,41 @@ def main() -> None:
         metavar="NAME",
         help="suffix for the output file names, e.g. --tag strict",
     )
+    ap.add_argument(
+        "--sequence",
+        action="store_true",
+        help=(
+            "two circle groups (x(t) and y(t)) driving one pen, stepping "
+            "through N values until the error is under the target"
+        ),
+    )
+    ap.add_argument(
+        "--step-count",
+        type=int,
+        default=4,
+        help="how many N steps the --sequence animation walks through (default: 4)",
+    )
     args = ap.parse_args()
 
     OUT.mkdir(parents=True, exist_ok=True)
     points = SHAPES[args.shape]()
     coeffs, freqs = coefficients(points)
+
+    if args.sequence:
+        for out in plot_sequence(
+            points,
+            coeffs,
+            freqs,
+            args.shape,
+            args.frames,
+            OUT,
+            target_error=args.target_error,
+            step_count=args.step_count,
+            tag=_clean_tag(args.tag),
+        ):
+            print(f"saved {out}")
+        if not (args.static or args.animate or args.panels):
+            return
 
     if args.panels:
         spec = args.panels.strip().lower()
@@ -201,9 +244,7 @@ def main() -> None:
             term_list = [int(x) for x in spec.replace(" ", "").split(",") if x]
             default_tag = ""
 
-        tag = default_tag if args.tag is None else args.tag
-        if tag and not tag.startswith("_"):
-            tag = f"_{tag}"
+        tag = _clean_tag(default_tag if args.tag is None else args.tag)
 
         for out in plot_panels(
             points,

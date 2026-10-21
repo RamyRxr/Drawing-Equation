@@ -33,6 +33,8 @@ math → polished, shareable **web app** with great animation.
 - ✅ Python prototype complete, numerically verified, committed & pushed
 - ✅ Multi-panel mode with a **0.1 % error target** (`--target-error`,
   `auto` / `strict`) — committed `31ab69c`
+- ✅ Two-group mode (`--sequence`): an `x(t)` chain and a `y(t)` chain driving
+  one pen, stepping through N until the error is under the target
 - ✅ `EXPLANATION.md` rewritten to document `.venv` and the whole project
 - ⬜ Web app (`web/`) — NOT started yet
 - `test.js` leftover at repo root: **already gone** (nothing to delete)
@@ -51,12 +53,14 @@ Drawing-Equation/
 │   ├── shapes.py      ← crown, star, heart, infinity; arc-length resampling
 │   ├── fourier.py     ← DFT coefficients, reconstruct, chain, rmse, relative_error
 │   ├── panels.py      ← multi-panel animation (GIF + MP4), freeze logic
-│   └── main.py        ← CLI: static PNG, single-shape GIF, panels mode
+│   ├── sequence.py    ← two-group animation: x(t) chain + y(t) chain -> one pen
+│   └── main.py        ← CLI: static PNG, single-shape GIF, panels, sequence
 ├── output/            ← generated files (git-ignored)
 │   ├── crown_static.png
 │   ├── crown_epicycles.gif
 │   ├── crown_panels.gif / .mp4          (auto: last panel < target)
 │   ├── crown_panels_strict.gif / .mp4   (strict: every panel < target)
+│   ├── crown_sequence.gif / .mp4        (two-group mode)
 │   └── <shape>_panels.gif / .mp4        for star / heart / infinity
 └── web/               ← (to build) interactive Canvas app
 ```
@@ -140,6 +144,60 @@ the "why" of each part and tie it back to the math. When building new code,
 favor small, reviewable steps and keep the animation quality high.
 
 ## Session log (newest first)
+
+### 2026-10-21 — Two-group mode (`--sequence`): an x(t) chain + a y(t) chain -> one pen
+- User asked for a mode with **two separated circle groups** (one for `x(t)`,
+  one for `y(t)`) driving a single pen, running through **at least 4 N steps**
+  and ending under **0.1 %**, with the two formulas + the current `N` + the
+  error printed under the drawing.
+- **The design was rebuilt once.** Option A (the x-chain = the complex chain,
+  the y-chain = the same chain turned −90°) was rejected: the left panel
+  redundantly re-traced the shape and the printed formulas were not literally
+  the `Σ_{k=1}^{N}` form. Option B keeps the **classic real Fourier partial
+  sum** (every harmonic `|f| ≤ N`), so the displayed formulas are exactly
+  true.
+- New `fourier.py::by_frequency(coeffs, freqs)` → `{signed freq: complex}`.
+- New `fourier.py::harmonic_coeffs(table, k)` → `(a_k, b_k, c_k, d_k)`.
+  Folding the `±k` pair: with `C+ = α₊+iβ₊` and `C- = α₋+iβ₋`,
+  `a_k = α₊+α₋`, `b_k = -β₊+β₋`, `c_k = β₊+β₋`, `d_k = α₊-α₋`.
+- New `fourier.py::harmonic_chains(coeffs, freqs, terms, frames)` → two chains
+  shaped `(2·terms+2, frames)` whose tips are **exactly** `x(t)` and `y(t)`
+  (both real). New `fourier.py::harmonic_error_curve` → the error % for
+  keeping harmonics `1..N` via the Parseval tail.
+- New `python/sequence.py`: `pick_steps()` (geometric ladder; `end` = the
+  smallest N under `target × 0.95`), `plot_sequence()` (3 panels + info row),
+  `FORMULAS`, `_write_gif_from_mp4()`.
+- **Layout**: left = the x(t) chain (its tip slides along the horizontal
+  axis), middle = the pen at `(x(t), y(t))` drawing the shape, right = the
+  y(t) chain turned a quarter turn (its tip slides up the vertical axis).
+  A dashed line runs from each chain's tip to the pen.
+- **N means the highest retained harmonic here** (a classic partial sum),
+  which is *different* from `--panels` where N counts individual DFT terms.
+  Both modes print their own true error; the numbers are not comparable.
+- `--frames` = frames **per step**; `--step-count` (default 4) = how many
+  steps. The video is `frames × steps` long.
+- **One render pass**: the MP4 is written first (streaming), then the GIF is
+  converted from it with the bundled ffmpeg (`palettegen`/`paletteuse`), which
+  keeps memory flat. Falls back to `PillowWriter` if the conversion fails.
+- Output: `output/<shape>_sequence.gif` / `.mp4` (h264/yuv420p, 1500×840,
+  30 fps). `--tag NAME` gives any other suffix.
+- Steps at the 0.1 % target: crown `6, 15, 40, 102` (4.55/1.38/0.35/**0.0934 %**),
+  star `6, 15, 38, 96` (**0.0946 %**), heart `1, 2, 3, 4` (0.0000 %),
+  infinity `2, 3, 5, 8` (0.0867 %).
+- **Fixed a real bug**: the y-chain is turned by `1j` for display, but the pen's
+  y was read from `.real` (always 0) — it must be `.imag`.
+- **Fixed a bug in the verification harness**: it stored the *figure* (mutated
+  in place) instead of snapshotting the text at capture time. Now the text set
+  is snapshotted per frame.
+- Verified (0 failures): the error curve == the direct reconstruction to
+  <1e-9; each chain tip == `Re`/`Im` of the partial sum to <1e-12; the printed
+  `a_k/b_k` and `c_k/d_k` series rebuild `x(t)`/`y(t)` to <1e-12; the last
+  step is under 0.1 % for all 4 shapes; the steps are sorted and distinct;
+  every per-step read-out is present; the pen == the partial sum; both
+  connector lines exist.
+- Docs updated: `EXPLANATION.md` gained a whole `--sequence` section (plus
+  TOC, repo layout, file table, CLI table, data-flow diagram),
+  `README.md` gained a "two-group animation" section.
 
 ### 2026-10-21 — Error-target mode: `--target-error`, `auto` / `strict`
 - User wanted error **< 0.1 %**. Rather than hardcode N, the panel term

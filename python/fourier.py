@@ -61,6 +61,113 @@ def chain(coeffs: np.ndarray, freqs: np.ndarray, theta: float, terms: int) -> np
     return np.cumsum(c * np.exp(1j * f * theta))
 
 
+def by_frequency(coeffs: np.ndarray, freqs: np.ndarray) -> dict[int, complex]:
+    """Index the coefficients by their **signed** frequency.
+
+    ``table[k]`` is the complex coefficient that rotates at frequency ``k``
+    (``k`` may be negative). A frequency that is not in the set is simply
+    missing from the dictionary.
+    """
+    return {int(f): complex(c) for c, f in zip(coeffs, freqs)}
+
+
+def harmonic_coeffs(
+    table: dict[int, complex], k: int
+) -> tuple[float, float, float, float]:
+    """The real Fourier coefficients ``(a_k, b_k, c_k, d_k)`` of harmonic ``k``.
+
+    The pair of DFT coefficients at ``+k`` and ``-k`` together form one real
+    harmonic of the shape. Writing ``C+ = alpha+ + i*beta+`` and
+    ``C- = alpha- + i*beta-``:
+
+        C+ * e^(i k t) = ( alpha+ cos kt - beta+ sin kt )
+                       + i( beta+  cos kt + alpha+ sin kt )
+        C- * e^(-i k t) = ( alpha- cos kt + beta- sin kt )
+                       + i( beta-  cos kt - alpha- sin kt )
+
+    Adding the two real parts and the two imaginary parts gives the classic
+    real Fourier series of the shape:
+
+        x(t) = sum_k ( a_k*cos(k t) + b_k*sin(k t) )
+        y(t) = sum_k ( c_k*cos(k t) + d_k*sin(k t) )
+    """
+    cp = table.get(k, 0j)
+    cm = table.get(-k, 0j)
+    a = cp.real + cm.real
+    b = -cp.imag + cm.imag
+    c = cp.imag + cm.imag
+    d = cp.real - cm.real
+    return a, b, c, d
+
+
+def harmonic_chains(
+    coeffs: np.ndarray, freqs: np.ndarray, terms: int, frames: int
+) -> tuple[np.ndarray, np.ndarray]:
+    """Build the ``x(t)`` chain and the ``y(t)`` chain for harmonics ``1..terms``.
+
+    Each harmonic contributes **two** circles -- one turning at ``+k`` and one
+    at ``-k`` -- so the running total stays real. That is what makes the tip
+    of the x chain sit exactly on the horizontal axis at ``x(t)``, and the tip
+    of the y chain at ``y(t)``.
+
+    Returns ``(x_chain, y_chain)``, both shaped ``(2*terms + 2, frames)``.
+    Row ``-1`` of ``x_chain`` is ``x(t)`` (a real number) and row ``-1`` of
+    ``y_chain`` is ``y(t)``.
+    """
+    table = by_frequency(coeffs, freqs)
+    theta = 2 * np.pi * np.arange(frames) / frames
+
+    dc = table.get(0, 0j)
+    vectors_x = [np.full(frames, dc.real, dtype=complex)]
+    vectors_y = [np.full(frames, dc.imag, dtype=complex)]
+
+    for k in range(1, terms + 1):
+        a, b, c, d = harmonic_coeffs(table, k)
+        # X_k = (a_k - i b_k)/2  =>  2*Re(X_k e^(i k t)) = a_k cos kt + b_k sin kt
+        xk = (a - 1j * b) / 2
+        yk = (c - 1j * d) / 2
+        vectors_x.append(xk * np.exp(1j * k * theta))
+        vectors_x.append(np.conj(xk) * np.exp(-1j * k * theta))
+        vectors_y.append(yk * np.exp(1j * k * theta))
+        vectors_y.append(np.conj(yk) * np.exp(-1j * k * theta))
+
+    vx = np.array(vectors_x)
+    vy = np.array(vectors_y)
+    zeros = np.zeros((1, frames), dtype=complex)
+    x_chain = np.concatenate([zeros, np.cumsum(vx, axis=0)])
+    y_chain = np.concatenate([zeros, np.cumsum(vy, axis=0)])
+    return x_chain, y_chain
+
+
+def harmonic_error_curve(
+    points: np.ndarray, coeffs: np.ndarray, freqs: np.ndarray
+) -> np.ndarray:
+    """Error percentage for keeping the harmonics ``1..N``.
+
+    ``result[N]`` is the error you get from the classic Fourier partial sum
+    that keeps every frequency up to ``N``. It is the same number
+    :func:`relative_error` returns for that partial sum, but computed for all
+    ``N`` at once.
+
+    By Parseval's identity the squared error is the energy of the discarded
+    tail, so only the squared magnitudes have to be added up:
+
+        RMSE(N)^2 = sum_{|freq| > N} |c_freq|^2
+    """
+    z = points[:, 0] + 1j * points[:, 1]
+    radius = float(np.sqrt(np.mean(np.abs(z - z.mean()) ** 2))) or 1.0
+
+    n = len(coeffs)
+    max_k = n // 2
+    energy = np.zeros(max_k + 2)
+    np.add.at(energy, np.abs(freqs).astype(int), np.abs(coeffs) ** 2)
+
+    # tail[j] = sum of energy[j:];  dropping |freq| > N leaves energy[N+1:].
+    tail = np.cumsum(energy[::-1])[::-1]
+    curve = 100.0 * np.sqrt(tail[1 : max_k + 2]) / radius
+    return curve
+
+
 def rmse(points: np.ndarray, coeffs: np.ndarray, freqs: np.ndarray, terms: int) -> float:
     """Root-mean-square reconstruction error using ``terms`` coefficients."""
     n = len(points)
