@@ -61,8 +61,9 @@ Drawing-Equation/
 ├── output/                    generated artwork (git-ignored, safe to delete)
 │   ├── crown_static.png       4-panel comparison: 3 / 8 / 20 / 60 terms
 │   ├── crown_epicycles.gif    spinning epicycles, 32 circles
-│   ├── heart_static.png
-│   └── heart_epicycles.gif
+│   ├── crown_panels.gif/.mp4  multi-panel, auto N (last panel under target)
+│   ├── crown_panels_strict.*  multi-panel, every panel under the target
+│   └── <shape>_panels.*       same for star / heart / infinity
 │
 ├── python/                    the prototype
 │   ├── __pycache__/           compiled .pyc cache (git-ignored, auto-created)
@@ -332,8 +333,11 @@ From the `python` folder:
 | `--shape NAME` | one of `crown`, `star`, `heart`, `infinity` | `crown` |
 | `--static` | save an N-terms comparison PNG | off |
 | `--animate` | save the epicycle animation GIF | off |
-| `--panels N,N,N` | save the **multi-panel** animation (GIF + MP4) | off |
+| `--panels [LIST]` | multi-panel animation. `auto` (or bare) picks N from the error target; `strict` makes **every** panel beat it; a list uses exactly those N | off |
+| `--target-error PCT` | error target in percent, used by `auto` / `strict` | `0.1` |
+| `--panel-count N` | how many panels `auto` / `strict` create | `4` |
 | `--freeze N` | how many of the largest circles are drawn **static** | `2` |
+| `--tag NAME` | suffix for the output file names (`crown_panels` → `crown_panels_NAME`) | off |
 | `--terms N` | epicycles used **in the `--animate` GIF only** | `32` |
 | `--frames N` | frames per full loop | `100` |
 
@@ -343,7 +347,7 @@ Three gotchas worth knowing:
   "two shapes".
 - `--terms` does **not** affect the static image or the panel animation. The
   static image always uses the hardcoded list `[3, 8, 20, 60]`; the panel
-  animation uses whatever list you pass to `--panels`.
+  animation uses `--panels` (or the error target).
 - If you pass **neither** `--static`, `--animate` nor `--panels`, you get the
   static image anyway.
 
@@ -357,7 +361,7 @@ can watch the approximation tighten left to right.
 
 ```powershell
 cd C:\Users\Ramy\Desktop\HQP\Drawing-Equation\python
-..\.venv\Scripts\python.exe main.py --shape crown --panels 2,8,32,128
+..\.venv\Scripts\python.exe main.py --shape crown --panels
 ```
 
 You get **two** files in `output/`:
@@ -366,6 +370,10 @@ You get **two** files in `output/`:
 |---|---|---|
 | `crown_panels.gif` | GIF, 1600×500, 100 frames @ 30 fps | via Pillow |
 | `crown_panels.mp4` | MP4 (H.264 / yuv420p), 1600×500, 30 fps | via ffmpeg |
+
+`--panels strict` writes to `crown_panels_strict.gif` / `.mp4` so the two
+modes can sit side by side instead of overwriting each other. `--tag NAME`
+gives you any other suffix you like.
 
 The MP4 is written **without needing ffmpeg installed on your machine**:
 `imageio-ffmpeg` ships its own ffmpeg binary inside the venv, and
@@ -383,7 +391,7 @@ Four panels side by side. Each one:
 
 ```
 N = 32            <- mint, bold
-Error = 0.98 %    <- ink
+Error = 0.984 %   <- ink
 ```
 
 ### The error percentage
@@ -399,14 +407,65 @@ The denominator is the shape's own typical distance from its centre. Without
 it, the raw RMSE would be "in shape units" and a big shape would look worse
 than a small one for no good reason.
 
-Measured values for the crown:
+The label precision adapts (`panels.py::format_pct`). This matters: rounding
+`0.0996 %` to two decimals gives `"0.10 %"`, which *reads* as not being under
+a 0.1 % target even though it is. So small errors keep extra digits.
 
-| N | Error |
-|---:|---:|
-| 2 | 28.70 % |
-| 8 | 7.57 % |
-| 32 | 0.98 % |
-| 128 | 0.13 % |
+### Picking N so the error beats a target
+
+`--panels` on its own means `auto`: the term counts are derived from the
+shape's **actual error curve**, so the last panel always lands under the
+target. Change the target with `--target-error` (percent).
+
+| Mode | What it guarantees |
+|---|---|
+| `--panels` or `--panels auto` | the **last** panel is under the target; earlier ones show the progression |
+| `--panels strict` | **every** panel is under the target |
+| `--panels 2,8,32,128` | exactly those term counts, no target logic at all |
+
+```powershell
+# four panels, last one under 0.1 %
+..\.venv\Scripts\python.exe main.py --shape crown --panels
+
+# four panels, ALL of them under 0.1 %  (writes crown_panels_strict.*)
+..\.venv\Scripts\python.exe main.py --shape crown --panels strict
+
+# a much tighter target
+..\.venv\Scripts\python.exe main.py --shape crown --panels --target-error 0.01
+
+# six panels instead of four
+..\.venv\Scripts\python.exe main.py --shape crown --panels --panel-count 6
+```
+
+What each shape lands on at the 0.1 % target:
+
+| Shape | `auto` | errors | `strict` | errors |
+|---|---|---|---|---|
+| crown | 32, 64, 128, 256 | 0.984 %, 0.382 %, 0.133 %, **0.0438 %** | 158, 199, 251, 316 | **0.0944 %, 0.0660 %, 0.0453 %, 0.0274 %** |
+| star | 8, 16, 32, 64 | 0.844 %, 0.296 %, 0.105 %, **0.0385 %** | 35, 44, 56, 70 | **0.0924 %, 0.0658 %, 0.0465 %, 0.0339 %** |
+| heart | 1, 2, 4, 8 | 35.99 %, 28.18 %, 9.874 %, **0.0000 %** | 8, 10, 13, 16 | **all 0.0000 %** |
+| infinity | 2, 4, 8, 16 | 41.42 %, 17.16 %, 2.944 %, **0.0867 %** | 16, 20, 25, 32 | **0.0867 %, 0.0149 %, 0.0020 %, 0.00008 %** |
+
+`strict` mode uses a 5 % safety margin when picking its first N, so the
+printed number sits clearly under the target instead of on the boundary.
+
+### How the target search works
+
+`fourier.py::relative_error_curve` computes the error for **every** term
+count at once, in one pass. The trick is Parseval's identity: because the
+coefficients are sorted by magnitude, truncating to `t` terms just drops the
+tail, and the squared error of the dropped tail is the sum of its squared
+magnitudes:
+
+```
+RMSE(t)² = Σ_{k ≥ t} |c_k|²
+```
+
+That is `np.cumsum` over the reversed magnitudes — O(N) for the whole curve
+instead of O(N²). It is verified to agree with the direct reconstruction to
+within 9e-14 across all 512 term counts and all four shapes, and because it
+is a running total of a tail it is **monotonically non-increasing** — which is
+what makes the search for "the smallest N under the target" exact.
 
 ### The two static "main" circles (`--freeze`)
 
@@ -428,7 +487,7 @@ the error printed under each panel is the true mathematical error.
 
 Use `--freeze 0` for the classic look where every circle spins.
 
-### Choosing the N values
+### Choosing the N values by hand
 
 The list is whatever you pass, so you are not stuck with four panels:
 
@@ -479,6 +538,7 @@ This is the whole program in one picture:
         → crown_static.png               each with its own chain,
                                          trail and error label
                                          → crown_panels.gif / .mp4
+                                         (and _strict for --panels strict)
 ```
 
 Two different reconstruction helpers exist because the two outputs need
@@ -878,6 +938,12 @@ These are settled; change them deliberately, not by accident.
 
 **Sample count:** 512 for every shape. Large enough that the DFT is accurate,
 small enough that the matrix product in `reconstruct` is instant.
+
+**Error target:** 0.1 % by default (`--target-error`). The panel term counts
+are *derived* from each shape's real error curve rather than hardcoded, so
+the crown (which converges slowly because of its sharp spikes) and the heart
+(which is made of cosines and converges immediately) each get a sensible
+ladder.
 
 **Cosmetic note:** `_bare_axes` (lines 45–55) sets `set_aspect("equal")`. Without
 it the shapes would look stretched, because data coordinates wouldn't match

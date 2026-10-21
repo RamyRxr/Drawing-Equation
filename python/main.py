@@ -29,8 +29,8 @@ import numpy as np
 from matplotlib.animation import FuncAnimation, PillowWriter
 from matplotlib.patches import Circle
 
-from fourier import chain, coefficients, reconstruct, relative_error, rmse
-from panels import plot_panels
+from fourier import chain, coefficients, reconstruct, relative_error, rmse, select_terms
+from panels import format_pct, plot_panels
 from shapes import SHAPES
 
 OUT = Path(__file__).resolve().parent.parent / "output"
@@ -75,7 +75,7 @@ def plot_static(points, coeffs, freqs, term_options, shape_name: str) -> Path:
         # Same under-graph labels as the multi-panel animation.
         ax.text(0.5, -0.075, f"N = {terms}", transform=ax.transAxes, ha="center",
                 va="top", color=MINT, fontsize=14, fontweight="bold")
-        ax.text(0.5, -0.135, f"Error = {err:.2f} %", transform=ax.transAxes, ha="center",
+        ax.text(0.5, -0.135, f"Error = {format_pct(err)}", transform=ax.transAxes, ha="center",
                 va="top", color=INK, fontsize=10)
 
     fig.suptitle(f"Fourier reconstruction — {shape_name}", color="white", fontsize=13)
@@ -142,15 +142,41 @@ def main() -> None:
     ap.add_argument(
         "--panels",
         type=str,
+        nargs="?",
+        const="auto",
         default=None,
         metavar="N,N,N",
-        help="multi-panel animation: comma-separated term counts, e.g. 2,8,32,128",
+        help=(
+            "multi-panel animation. Give a comma-separated list of term counts "
+            "(e.g. 2,8,32,128), 'auto' to pick them from the error target, or "
+            "'strict' so every panel beats the target. Bare --panels = auto."
+        ),
+    )
+    ap.add_argument(
+        "--target-error",
+        type=float,
+        default=0.1,
+        metavar="PCT",
+        help="error target in percent, used by 'auto' and 'strict' (default: 0.1)",
+    )
+    ap.add_argument(
+        "--panel-count",
+        type=int,
+        default=4,
+        help="how many panels 'auto'/'strict' should create (default: 4)",
     )
     ap.add_argument(
         "--freeze",
         type=int,
         default=2,
         help="how many of the largest circles are drawn static (0 = every circle spins)",
+    )
+    ap.add_argument(
+        "--tag",
+        type=str,
+        default=None,
+        metavar="NAME",
+        help="suffix for the output file names, e.g. --tag strict",
     )
     args = ap.parse_args()
 
@@ -159,9 +185,37 @@ def main() -> None:
     coeffs, freqs = coefficients(points)
 
     if args.panels:
-        term_list = [int(x) for x in args.panels.replace(" ", "").split(",") if x]
+        spec = args.panels.strip().lower()
+        if spec == "auto":
+            term_list = select_terms(
+                points, coeffs, freqs, args.target_error, args.panel_count
+            )
+            default_tag = ""
+        elif spec == "strict":
+            term_list = select_terms(
+                points, coeffs, freqs, args.target_error, args.panel_count, strict=True
+            )
+            # Keep strict output next to the auto output instead of overwriting it.
+            default_tag = "_strict"
+        else:
+            term_list = [int(x) for x in spec.replace(" ", "").split(",") if x]
+            default_tag = ""
+
+        tag = default_tag if args.tag is None else args.tag
+        if tag and not tag.startswith("_"):
+            tag = f"_{tag}"
+
         for out in plot_panels(
-            points, coeffs, freqs, args.shape, term_list, args.frames, args.freeze, OUT
+            points,
+            coeffs,
+            freqs,
+            args.shape,
+            term_list,
+            args.frames,
+            args.freeze,
+            OUT,
+            target_error=args.target_error,
+            tag=tag,
         ):
             print(f"saved {out}")
 

@@ -33,7 +33,7 @@ import matplotlib.pyplot as plt
 from matplotlib.animation import FFMpegWriter, FuncAnimation, PillowWriter
 from matplotlib.patches import Circle
 
-from fourier import chain, relative_error
+from fourier import chain, relative_error_curve
 
 BG = "#0b0b12"
 GRID = "#333355"
@@ -44,6 +44,24 @@ SPOKE = "#4d7a99"
 FROZEN = "#7fb8d4"  # brighter tint for the circles that are held still
 
 FPS = 30
+
+
+def format_pct(value: float) -> str:
+    """Format an error percentage so the target comparison is unambiguous.
+
+    Rounding 0.0996 % to two decimals gives "0.10 %", which *reads* as not
+    being under a 0.1 % target even though it is. So the precision adapts:
+    small numbers keep enough digits to be judged correctly.
+    """
+    if value == 0:
+        return "0.000 %"
+    if value < 0.001:
+        return f"{value:.5f} %"
+    if value < 0.1:
+        return f"{value:.4f} %"
+    if value < 10:
+        return f"{value:.3f} %"
+    return f"{value:.2f} %"
 
 
 def _blank_axes(ax, lim: float) -> None:
@@ -69,6 +87,7 @@ def build_figure(
     shape_name: str,
     term_list: list[int],
     freeze: int,
+    target_error: float | None = None,
 ):
     """Build the multi-panel figure and return ``(fig, panels)``.
 
@@ -78,7 +97,8 @@ def build_figure(
     true = points[:, 0] + 1j * points[:, 1]
     lim = float(np.max(np.abs(points))) * 1.18
     terms = [min(max(int(t), 1), len(coeffs)) for t in term_list]
-    errors = [relative_error(points, coeffs, freqs, t) for t in terms]
+    curve = relative_error_curve(points, coeffs)
+    errors = [float(curve[t]) for t in terms]
 
     fig, axes = plt.subplots(1, len(terms), figsize=(4.0 * len(terms), 5.0))
     axes = np.atleast_1d(axes)
@@ -127,7 +147,7 @@ def build_figure(
         ax.text(
             0.5,
             -0.135,
-            f"Error = {err:.2f} %",
+            f"Error = {format_pct(err)}",
             transform=ax.transAxes,
             ha="center",
             va="top",
@@ -150,9 +170,11 @@ def build_figure(
             }
         )
 
+    subtitle = f"  ({freeze} main circles held static)" if freeze else ""
+    if target_error is not None:
+        subtitle += f"  •  error target < {target_error:g} %"
     fig.suptitle(
-        f"Fourier epicycles — {shape_name}"
-        + (f"  ({freeze} main circles held static)" if freeze else ""),
+        f"Fourier epicycles — {shape_name}{subtitle}",
         color="white",
         fontsize=14,
         y=0.99,
@@ -170,10 +192,16 @@ def plot_panels(
     frames: int,
     freeze: int,
     out_dir: Path,
+    target_error: float | None = None,
+    tag: str = "",
 ) -> list[Path]:
-    """Render the multi-panel animation and return the files written."""
+    """Render the multi-panel animation and return the files written.
+
+    ``tag`` is inserted into the file name (``crown_panels.gif`` ->
+    ``crown_panels_strict.gif``) so different modes can live side by side.
+    """
     fig, panels = build_figure(
-        points, coeffs, freqs, shape_name, term_list, freeze
+        points, coeffs, freqs, shape_name, term_list, freeze, target_error
     )
 
     def reset() -> None:
@@ -214,7 +242,7 @@ def plot_panels(
     written: list[Path] = []
 
     # --- GIF -------------------------------------------------------------
-    gif_path = out_dir / f"{shape_name}_panels.gif"
+    gif_path = out_dir / f"{shape_name}_panels{tag}.gif"
     anim = FuncAnimation(fig, update, frames=frames, interval=1000 / FPS, blit=False)
     anim.save(gif_path, writer=PillowWriter(fps=FPS))
     written.append(gif_path)
@@ -227,7 +255,7 @@ def plot_panels(
 
         matplotlib.rcParams["animation.ffmpeg_path"] = imageio_ffmpeg.get_ffmpeg_exe()
         reset()
-        mp4_path = out_dir / f"{shape_name}_panels.mp4"
+        mp4_path = out_dir / f"{shape_name}_panels{tag}.mp4"
         anim2 = FuncAnimation(fig, update, frames=frames, interval=1000 / FPS, blit=False)
         anim2.save(
             mp4_path,

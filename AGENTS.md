@@ -52,8 +52,9 @@ Drawing-Equation/
 ├── output/            ← generated files (git-ignored)
 │   ├── crown_static.png
 │   ├── crown_epicycles.gif
-│   ├── crown_panels.gif / .mp4
-│   └── heart_panels.gif / .mp4
+│   ├── crown_panels.gif / .mp4          (auto: last panel < target)
+│   ├── crown_panels_strict.gif / .mp4   (strict: every panel < target)
+│   └── <shape>_panels.gif / .mp4        for star / heart / infinity
 └── web/               ← (to build) interactive Canvas app
 ```
 
@@ -71,10 +72,14 @@ cd Drawing-Equation\python
 ..\.venv\Scripts\python.exe main.py --shape crown --static
 ..\.venv\Scripts\python.exe main.py --shape crown --animate --terms 32 --frames 100
 ..\.venv\Scripts\python.exe main.py --shape heart --static --animate
+..\.venv\Scripts\python.exe main.py --shape crown --panels
+..\.venv\Scripts\python.exe main.py --shape crown --panels strict
 ```
 
 `--shape` ∈ {crown, star, heart, infinity} · `--terms` = epicycle count ·
 `--frames` = frames per loop. Output goes to `output/`.
+`--panels` (bare) = target-driven, `--panels strict` = every panel under the
+target, `--panels 2,8,32,128` = explicit list.
 
 ## Verified math (do not regress this)
 
@@ -132,6 +137,42 @@ the "why" of each part and tie it back to the math. When building new code,
 favor small, reviewable steps and keep the animation quality high.
 
 ## Session log (newest first)
+
+### 2026-10-21 — Error-target mode: `--target-error`, `auto` / `strict`
+- User wanted error **< 0.1 %**. Rather than hardcode N, the panel term
+  counts are now derived from the shape's **actual error curve**.
+- New `fourier.py::relative_error_curve` → error % for every term count in
+  one O(N) pass, via Parseval: `RMSE(t)² = Σ_{k≥t} |c_k|²` (valid because
+  the coefficients are sorted by |c|). Verified against the direct
+  reconstruction to **9e-14 across all 512 term counts × 4 shapes**. Being a
+  running tail total, the curve is **monotonically non-increasing**, which is
+  what makes the "smallest N under target" search exact.
+- New `fourier.py::select_terms(points, coeffs, freqs, target_pct, count,
+  strict)`. `strict=False` → ladder of powers of two whose **last** panel is
+  the first to beat the target. `strict=True` → ladder where **every** panel
+  beats it (with a 5 % safety margin so the printed number is not on the
+  boundary).
+- CLI: `--panels` is now `nargs="?"` — bare or `auto` = target-driven,
+  `strict` = every panel under target, anything else = explicit list.
+  New `--target-error PCT` (default 0.1) and `--panel-count N` (default 4).
+- **Fixed a display bug**: `format_pct` now adapts precision. Rounding
+  0.0996 % to 2 decimals printed "0.10 %", which *reads* as not under a
+  0.1 % target. Small errors now keep 4–5 digits.
+- At the 0.1 % target — crown: auto N = 32/64/128/256 → 0.984/0.382/0.133/
+  **0.0438 %**; strict N = 158/199/251/316 → **0.0944/0.0660/0.0453/0.0274 %**.
+  star: strict N = 35/44/56/70. heart: strict N = 8/10/13/16 (all 0.0000 %).
+  infinity: strict N = 16/20/25/32.
+- Also fixed a bug found during verification: the tail-energy formula needs
+  `cumsum(sq[::-1])[::-1]`, not `cumsum(sq)[::-1]` — the latter silently
+  computes the *head* sum and made every shape resolve to N = 512.
+- Verified: 240 combinations (4 shapes × 6 targets × 5 counts × 2 modes) all
+  keep their error guarantee, stay sorted, in range and duplicate-free.
+- `--panels strict` now writes to `<shape>_panels_strict.gif/.mp4` so it does
+  not overwrite the `auto` output; new `--tag NAME` for any other suffix.
+- Final artefact check (0 failures): printed label == `format_pct(real error)`
+  for all 8 shape×mode combos; pen tip == `reconstruct()` to 1e-12 in all
+  panels; frozen circles byte-identical at θ=0 vs θ=2.1 while animated ones
+  move; every GIF 1600×500 × 100 frames, every MP4 h264/yuv420p.
 
 ### 2026-10-21 — Multi-panel mode (`--panels`): GIF + MP4, frozen main circles
 - **New mode** `python main.py --shape crown --panels 2,8,32,128` draws the

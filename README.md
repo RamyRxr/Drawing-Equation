@@ -59,14 +59,16 @@ Draw the **same shape four times at once**, each panel using a different
 number of Fourier terms, so you can watch the approximation tighten:
 
 ```powershell
-..\.venv\Scripts\python main.py --shape crown --panels 2,8,32,128
+..\.venv\Scripts\python main.py --shape crown --panels
 ```
 
-Each panel carries its term count and error percentage under the graph:
+The term counts are derived from the shape's real error curve, so the last
+panel always lands **under the error target** (0.1 % by default). Each panel
+carries its term count and error percentage under the graph:
 
 ```
-N = 32
-Error = 0.98 %
+N = 256
+Error = 0.0438 %
 ```
 
 You get **both** a GIF and an MP4 in `output/` — no system ffmpeg needed,
@@ -74,8 +76,17 @@ because `imageio-ffmpeg` ships its own binary inside the venv.
 
 | Flag | Meaning | Default |
 |---|---|---|
-| `--panels N,N,N` | multi-panel animation; the list of term counts | off |
+| `--panels [LIST]` | `auto`/bare picks N from the error target; `strict` makes **every** panel beat it; a list uses exactly those N | off |
+| `--target-error PCT` | the error target in percent | `0.1` |
+| `--panel-count N` | how many panels to create | `4` |
 | `--freeze N` | how many of the largest circles are drawn **static** | `2` |
+| `--tag NAME` | suffix for the output file names | off |
+
+At the 0.1 % target, the crown lands on N = 32, 64, 128, 256 (errors 0.984 %,
+0.382 %, 0.133 %, **0.0438 %**). With `--panels strict` *every* panel beats the
+target: N = 158, 199, 251, 316 → 0.0944 %, 0.0660 %, 0.0453 %, 0.0274 %. That
+run writes to `crown_panels_strict.gif` / `.mp4` so it does not overwrite the
+`auto` version.
 
 The two largest circles are held still (dashed) so the shape's skeleton stays
 anchored while the smaller circles spin. The freeze is visual only — the pen
