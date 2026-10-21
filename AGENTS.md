@@ -28,11 +28,14 @@ math → polished, shareable **web app** with great animation.
 - Branch: `main` (tracking `origin/main`)
 - Remote: `https://github.com/RamyRxr/Drawing-Equation.git`
 
-## Current status (2026-10-20)
+## Current status (2026-10-21)
 
-- ✅ Python prototype complete, numerically verified, committed & pushed (`1412638`)
+- ✅ Python prototype complete, numerically verified, committed & pushed
+- ✅ Multi-panel mode with a **0.1 % error target** (`--target-error`,
+  `auto` / `strict`) — committed `31ab69c`
+- ✅ `EXPLANATION.md` rewritten to document `.venv` and the whole project
 - ⬜ Web app (`web/`) — NOT started yet
-- Empty leftover file `test.js` at repo root — can be deleted
+- `test.js` leftover at repo root: **already gone** (nothing to delete)
 
 ## Repo layout
 
